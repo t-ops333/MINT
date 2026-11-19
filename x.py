@@ -1038,84 +1038,291 @@ async def cmd_vip_buy_text(message: Message):
 # =============================================================
 
 # ============================================================
-# КЛАНЫ
+# КЛАНЫ V2 — проще + туториал
 # ============================================================
-CLAN_HELP = (
-    f"🏰 <b>Кланы {BOT_NAME}</b>\n\n"
-    f"• <code>клан создать &lt;название&gt;</code> — {format_balance(100000000)}\n"
-    f"• <code>клан вступить &lt;название/id&gt;</code>\n"
-    f"• <code>клан выйти</code>\n"
-    f"• <code>клан инфо</code>\n"
-    f"• <code>клан казна &lt;сумма&gt;</code>\n"
-    f"• <code>клан снять &lt;сумма&gt;</code> (владелец)\n"
-    f"• <code>клан топ</code>"
-)
+CLAN_CREATE_PRICE = 10000000  # 10 млн
+clan_states = {}  # user_id -> {"action": ...}
+
+
+def _clan_main_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Создать клан", callback_data="clan:create"),
+         InlineKeyboardButton(text="🔍 Список кланов", callback_data="clan:list")],
+        [InlineKeyboardButton(text="👤 Мой клан", callback_data="clan:mine"),
+         InlineKeyboardButton(text="❓ Как это работает", callback_data="clan:tutorial")],
+        [InlineKeyboardButton(text="🏆 Топ кланов", callback_data="clan:top")]
+    ])
+
+
+def _clan_main_text():
+    return (
+        f"🏰 <b>КЛАНЫ {BOT_NAME}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Объединяйся с друзьями, качай общую казну,\n"
+        f"соревнуйся с другими кланами за первое место!\n\n"
+        f"💰 <b>Создание:</b> {format_balance(CLAN_CREATE_PRICE)}\n"
+        f"👥 <b>Участники:</b> неограниченно\n"
+        f"🏦 <b>Казна:</b> общая, снимает владелец\n\n"
+        f"<i>👇 Выбери действие:</i>"
+    )
 
 
 @router.message(F.text == "👥 Кланы")
 async def cmd_clan_btn(message: Message):
-    await message.answer(CLAN_HELP)
+    await message.answer(_clan_main_text(), reply_markup=_clan_main_kb())
 
 
-@router.message(F.text.lower().startswith(("clan", "клан")))
-async def clan_cmd(message: Message):
-    if message.text.lower() in ("клан", "clan"):
-        await message.answer(CLAN_HELP)
+@router.message(F.text.lower() == "клан")
+async def cmd_clan_text(message: Message):
+    await message.answer(_clan_main_text(), reply_markup=_clan_main_kb())
+
+
+@router.callback_query(F.data == "clan:main")
+async def clan_main_cb(callback: CallbackQuery):
+    await callback.message.edit_text(_clan_main_text(), reply_markup=_clan_main_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "clan:tutorial")
+async def clan_tutorial(callback: CallbackQuery):
+    await callback.message.edit_text(
+        f"📚 <b>КАК РАБОТАЮТ КЛАНЫ</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>1️⃣ Создай клан</b>\n"
+        f"💰 Нужно {format_balance(CLAN_CREATE_PRICE)}\n"
+        f"📝 Название: 3-20 символов, англ. буквы\n"
+        f"🎯 Ты автоматически становишься владельцем\n\n"
+        f"<b>2️⃣ Приглашай друзей</b>\n"
+        f"Друзья: <code>клан вступить Название</code>\n"
+        f"Или через кнопку <b>🔍 Список кланов</b>\n\n"
+        f"<b>3️⃣ Пополняйте казну</b>\n"
+        f"<code>клан казна 100000</code> — любой участник\n"
+        f"💰 Казна хранится в клане, не в твоём балансе\n\n"
+        f"<b>4️⃣ Снимай казну</b> (только владелец)\n"
+        f"<code>клан снять 50000</code> — идёт в твой баланс\n\n"
+        f"<b>5️⃣ Соревнуйся за топ</b>\n"
+        f"🏆 Самый богатый клан — в топе\n\n"
+        f"<i>Нажми «◀️ Назад» чтобы вернуться</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "clan:create")
+async def clan_create_cb(callback: CallbackQuery):
+    if get_user_clan(callback.from_user.id):
+        await callback.answer("Ты уже в клане!", show_alert=True)
         return
+    clan_states[callback.from_user.id] = {"action": "clan_create_name"}
+    await callback.message.edit_text(
+        f"➕ <b>СОЗДАНИЕ КЛАНА</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Цена: <b>{format_balance(CLAN_CREATE_PRICE)}</b>\n\n"
+        f"📝 Отправь <b>название клана</b> в чат:\n"
+        f"• 3-20 символов\n"
+        f"• Английские буквы/цифры/_\n"
+        f"• Без пробелов\n\n"
+        f"<i>Пример: <code>Dragons</code></i>\n\n"
+        f"<i>Для отмены: /cancel</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="clan:main")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "clan:list")
+async def clan_list_cb(callback: CallbackQuery):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT c.id, c.name, c.balance,
+                       (SELECT COUNT(*) FROM clan_members WHERE clan_id = c.id) as members
+                FROM clans c ORDER BY c.balance DESC LIMIT 15
+            """)
+            rows = cursor.fetchall()
+    if not rows:
+        await callback.message.edit_text(
+            f"🔍 <b>Список кланов</b>\n\n"
+            f"Кланов пока нет. Стань первым!\n\n"
+            f"💰 Создание: {format_balance(CLAN_CREATE_PRICE)}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Создать клан", callback_data="clan:create")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+            ])
+        )
+        await callback.answer()
+        return
+    text = f"🔍 <b>СПИСОК КЛАНОВ</b>\n━━━━━━━━━━━━━━━━━━━━━\n\n"
+    buttons = []
+    in_clan = get_user_clan(callback.from_user.id)
+    for cid, name, bal, members in rows:
+        text += f"🏰 <b>{name}</b> — 👥 {members} | 💰 {format_balance(bal)}\n"
+        if not in_clan:
+            buttons.append([InlineKeyboardButton(
+                text=f"✅ Вступить в {name}",
+                callback_data=f"clan:join:{cid}"
+            )])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("clan:join:"))
+async def clan_join_cb(callback: CallbackQuery):
+    cid = int(callback.data.split(":")[2])
+    if get_user_clan(callback.from_user.id):
+        await callback.answer("Ты уже в клане!", show_alert=True)
+        return
+    clan = get_clan_by_name_or_id(cid)
+    if not clan:
+        await callback.answer("Клан не найден", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("INSERT INTO clan_members (clan_id, user_id) VALUES (%s, %s)",
+                           (clan['id'], callback.from_user.id))
+            cursor.execute("UPDATE users SET clan_id = %s WHERE user_id = %s",
+                           (clan['id'], callback.from_user.id))
+            conn.commit()
+    await callback.message.edit_text(
+        f"✅ <b>Ты вступил в клан!</b>\n\n"
+        f"🏰 Клан: <b>{clan['name']}</b>\n"
+        f"👥 Участников: +1\n"
+        f"💰 Казна: {format_balance(clan['balance'])}\n\n"
+        f"📋 <i>Полезно знать:</i>\n"
+        f"• <code>клан инфо</code> — инфо о клане\n"
+        f"• <code>клан казна 100000</code> — пополнить\n"
+        f"• <code>клан выйти</code> — покинуть",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👤 Мой клан", callback_data="clan:mine")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+        ])
+    )
+    await callback.answer("Вступил!")
+
+
+@router.callback_query(F.data == "clan:mine")
+async def clan_mine_cb(callback: CallbackQuery):
+    clan = get_user_clan(callback.from_user.id)
+    if not clan:
+        await callback.message.edit_text(
+            f"👤 <b>Мой клан</b>\n\n"
+            f"Ты не в клане.\n\n"
+            f"Вступи в существующий через <b>🔍 Список кланов</b>\n"
+            f"или создай свой за {format_balance(CLAN_CREATE_PRICE)}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Создать клан", callback_data="clan:create")],
+                [InlineKeyboardButton(text="🔍 Список кланов", callback_data="clan:list")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+            ])
+        )
+        await callback.answer()
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM clan_members WHERE clan_id = %s", (clan['id'],))
+            cnt = cursor.fetchone()[0]
+    owner = get_user(clan['owner_id'])
+    is_owner_user = clan['owner_id'] == callback.from_user.id
+    owner_tag = " (ты)" if is_owner_user else ""
+    await callback.message.edit_text(
+        f"👤 <b>Мой клан</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏰 <b>{clan['name']}</b> (ID: {clan['id']})\n"
+        f"👑 Владелец: {get_mention(clan['owner_id'], owner['first_name'])}{owner_tag}\n"
+        f"👥 Участников: <b>{cnt}</b>\n"
+        f"💰 Казна: <b>{format_balance(clan['balance'])}</b>\n\n"
+        f"<b>Команды:</b>\n"
+        f"• <code>клан казна 100000</code> — пополнить\n"
+        f"{'• <code>клан снять 50000</code> — снять в баланс' + chr(10) if is_owner_user else ''}"
+        f"• <code>клан выйти</code> — покинуть",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="clan:mine")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "clan:top")
+async def clan_top_cb(callback: CallbackQuery):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, name, balance FROM clans ORDER BY balance DESC LIMIT 10")
+            rows = cursor.fetchall()
+    if not rows:
+        await callback.message.edit_text(
+            f"🏆 Топ кланов пуст.\n\nСтань первым!",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Создать клан", callback_data="clan:create")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+            ])
+        )
+        await callback.answer()
+        return
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    text = f"🏆 <b>ТОП-10 КЛАНОВ</b>\n━━━━━━━━━━━━━━━━━━━━━\n\n"
+    for i, (cid, name, bal) in enumerate(rows, 1):
+        text += f"{medals.get(i, f'{i}.')} <b>{name}</b> — {format_balance(bal)}\n"
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="clan:main")]
+        ])
+    )
+    await callback.answer()
+
+
+# ---------- ТЕКСТОВЫЕ КОМАНДЫ (для совместимости) ----------
+@router.message(F.text.lower().startswith(("clan ", "клан ")))
+async def clan_cmd(message: Message):
     args = message.text.split()
     if len(args) < 2:
-        await message.answer(CLAN_HELP)
+        await message.answer(_clan_main_text(), reply_markup=_clan_main_kb())
         return
     sub = args[1].lower()
 
     if sub == "создать":
-        if len(args) < 3:
-            await message.answer("Укажи название (англ. буквы, 3-20 символов).")
-            return
-        name = args[2]
-        if not re.match("^[a-zA-Z0-9_]{3,20}$", name):
-            await message.answer("❌ Название: 3-20 символов, англ. буквы/цифры/_")
-            return
         if get_user_clan(message.from_user.id):
             await message.answer("❌ Ты уже в клане.")
             return
-        price = 100000000
-        user = get_user(message.from_user.id)
-        if user['balance'] < price:
-            await message.answer(f"❌ Нужно {format_balance(price)} для создания.")
-            return
-        with get_db() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM clans WHERE lower(name) = lower(%s)", (name,))
-                if cursor.fetchone():
-                    await message.answer("❌ Клан с таким названием уже существует.")
-                    return
-                update_balance(message.from_user.id, -price)
-                cursor.execute("INSERT INTO clans (name, owner_id, balance) VALUES (%s, %s, 0) RETURNING id",
-                               (name, message.from_user.id))
-                clan_id = cursor.fetchone()[0]
-                cursor.execute("INSERT INTO clan_members (clan_id, user_id) VALUES (%s, %s)", (clan_id, message.from_user.id))
-                cursor.execute("UPDATE users SET clan_id = %s WHERE user_id = %s", (clan_id, message.from_user.id))
-                conn.commit()
-        await message.answer(f"🏰 Клан '<b>{name}</b>' создан! ID: {clan_id}")
+        clan_states[message.from_user.id] = {"action": "clan_create_name"}
+        await message.answer(
+            f"➕ <b>Создание клана</b>\n\n"
+            f"💰 Цена: {format_balance(CLAN_CREATE_PRICE)}\n\n"
+            f"Отправь название клана в чат:\n"
+            f"• 3-20 символов, англ. буквы/цифры\n"
+            f"• Пример: <code>Dragons</code>\n\n"
+            f"<i>Для отмены: /cancel</i>"
+        )
+        return
 
     elif sub == "вступить":
         if len(args) < 3:
-            await message.answer("Укажи название или ID клана.")
-            return
-        clan = get_clan_by_name_or_id(args[2])
-        if not clan:
-            await message.answer("❌ Клан не найден.")
+            await message.answer(
+                f"Укажи название или ID клана:\n"
+                f"<code>клан вступить Dragons</code>\n\n"
+                f"Или посмотри список: кнопка <b>👥 Кланы</b>"
+            )
             return
         if get_user_clan(message.from_user.id):
             await message.answer("❌ Ты уже в клане.")
             return
+        clan = get_clan_by_name_or_id(args[2])
+        if not clan:
+            await message.answer("❌ Клан не найден. Проверь название.")
+            return
         with get_db() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("INSERT INTO clan_members (clan_id, user_id) VALUES (%s, %s)", (clan['id'], message.from_user.id))
-                cursor.execute("UPDATE users SET clan_id = %s WHERE user_id = %s", (clan['id'], message.from_user.id))
+                cursor.execute("INSERT INTO clan_members (clan_id, user_id) VALUES (%s, %s)",
+                               (clan['id'], message.from_user.id))
+                cursor.execute("UPDATE users SET clan_id = %s WHERE user_id = %s",
+                               (clan['id'], message.from_user.id))
                 conn.commit()
-        await message.answer(f"✅ Ты вступил в клан '<b>{clan['name']}</b>'.")
+        await message.answer(f"✅ Ты вступил в клан '<b>{clan['name']}</b>'!")
 
     elif sub == "выйти":
         clan = get_user_clan(message.from_user.id)
@@ -1124,7 +1331,8 @@ async def clan_cmd(message: Message):
             return
         with get_db() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM clan_members WHERE clan_id = %s AND user_id = %s", (clan['id'], message.from_user.id))
+                cursor.execute("DELETE FROM clan_members WHERE clan_id = %s AND user_id = %s",
+                               (clan['id'], message.from_user.id))
                 cursor.execute("UPDATE users SET clan_id = NULL WHERE user_id = %s", (message.from_user.id,))
                 conn.commit()
         await message.answer("✅ Ты вышел из клана.")
@@ -1132,7 +1340,7 @@ async def clan_cmd(message: Message):
     elif sub == "инфо":
         clan = get_user_clan(message.from_user.id)
         if not clan:
-            await message.answer("Ты не в клане.")
+            await message.answer("Ты не в клане. Открой <b>👥 Кланы</b> чтобы вступить.")
             return
         with get_db() as conn:
             with conn.cursor() as cursor:
@@ -1140,7 +1348,7 @@ async def clan_cmd(message: Message):
                 cnt = cursor.fetchone()[0]
         owner = get_user(clan['owner_id'])
         await message.answer(
-            f"🏰 <b>{clan['name']}</b> (ID: {clan['id']})\n"
+            f"🏰 <b>{clan['name']}</b>\n"
             f"👑 Владелец: {get_mention(clan['owner_id'], owner['first_name'])}\n"
             f"👥 Участников: {cnt}\n"
             f"💰 Казна: {format_balance(clan['balance'])}"
@@ -1148,7 +1356,7 @@ async def clan_cmd(message: Message):
 
     elif sub == "казна":
         if len(args) < 3 or not args[2].isdigit():
-            await message.answer("Укажи сумму: <code>клан казна 1000000</code>")
+            await message.answer("Укажи сумму: <code>клан казна 100000</code>")
             return
         amount = int(args[2])
         clan = get_user_clan(message.from_user.id)
@@ -1157,7 +1365,7 @@ async def clan_cmd(message: Message):
             return
         user = get_user(message.from_user.id)
         if user['balance'] < amount:
-            await message.answer("❌ Недостаточно средств.")
+            await message.answer(f"❌ Недостаточно. У тебя: {format_balance(user['balance'])}")
             return
         update_balance(message.from_user.id, -amount)
         with get_db() as conn:
@@ -1168,7 +1376,7 @@ async def clan_cmd(message: Message):
 
     elif sub == "снять":
         if len(args) < 3 or not args[2].isdigit():
-            await message.answer("Укажи сумму.")
+            await message.answer("Укажи сумму: <code>клан снять 50000</code>")
             return
         amount = int(args[2])
         clan = get_user_clan(message.from_user.id)
@@ -1176,14 +1384,15 @@ async def clan_cmd(message: Message):
             await message.answer("❌ Только владелец может снимать.")
             return
         if clan['balance'] < amount:
-            await message.answer("❌ Недостаточно в казне.")
+            await message.answer(f"❌ В казне только {format_balance(clan['balance'])}.")
             return
         with get_db() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE clans SET balance = balance - %s WHERE id = %s", (amount, clan['id']))
-                cursor.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (amount, message.from_user.id))
+                cursor.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s",
+                               (amount, message.from_user.id))
                 conn.commit()
-        await message.answer(f"✅ Снято {format_balance(amount)}.")
+        await message.answer(f"✅ Снято {format_balance(amount)} в твой баланс.")
 
     elif sub == "топ":
         with get_db() as conn:
@@ -1193,14 +1402,72 @@ async def clan_cmd(message: Message):
         if not rows:
             await message.answer("Кланов пока нет.")
             return
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         text = "🏆 <b>Топ кланов:</b>\n\n"
         for i, r in enumerate(rows, 1):
-            text += f"{i}. <b>{r[1]}</b> — {format_balance(r[2])}\n"
+            text += f"{medals.get(i, f'{i}.')} <b>{r[1]}</b> — {format_balance(r[2])}\n"
         await message.answer(text)
 
     else:
-        await message.answer(CLAN_HELP)
+        await message.answer(_clan_main_text(), reply_markup=_clan_main_kb())
 
+
+# ---------- STATE ДЛЯ СОЗДАНИЯ КЛАНА ----------
+@router.message(F.text, lambda m: m.from_user.id in clan_states)
+async def clan_state_handler(message: Message):
+    uid = message.from_user.id
+    state = clan_states.get(uid, {})
+    action = state.get("action")
+    text = (message.text or "").strip()
+
+    if text == "/cancel":
+        clan_states.pop(uid, None)
+        await message.answer("❌ Отменено.", reply_markup=_clan_main_kb())
+        return
+
+    if action == "clan_create_name":
+        if not re.match("^[a-zA-Z0-9_]{3,20}$", text):
+            await message.answer("❌ Название: 3-20 символов, англ. буквы/цифры/_.\nПопробуй снова или /cancel")
+            return
+        if get_user_clan(uid):
+            clan_states.pop(uid, None)
+            await message.answer("❌ Ты уже в клане.")
+            return
+        user = get_user(uid)
+        if user['balance'] < CLAN_CREATE_PRICE:
+            clan_states.pop(uid, None)
+            await message.answer(
+                f"❌ Недостаточно средств.\n"
+                f"Нужно: {format_balance(CLAN_CREATE_PRICE)}\n"
+                f"У тебя: {format_balance(user['balance'])}"
+            )
+            return
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM clans WHERE lower(name) = lower(%s)", (text,))
+                if cursor.fetchone():
+                    await message.answer("❌ Клан с таким названием уже есть. Попробуй другое или /cancel")
+                    return
+                update_balance(uid, -CLAN_CREATE_PRICE)
+                cursor.execute("INSERT INTO clans (name, owner_id, balance) VALUES (%s, %s, 0) RETURNING id",
+                               (text, uid))
+                clan_id = cursor.fetchone()[0]
+                cursor.execute("INSERT INTO clan_members (clan_id, user_id) VALUES (%s, %s)", (clan_id, uid))
+                cursor.execute("UPDATE users SET clan_id = %s WHERE user_id = %s", (clan_id, uid))
+                conn.commit()
+        clan_states.pop(uid, None)
+        await message.answer(
+            f"🏰 <b>КЛАН СОЗДАН!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📛 Название: <b>{text}</b>\n"
+            f"🆔 ID: {clan_id}\n"
+            f"👑 Ты — владелец\n\n"
+            f"<b>Что делать дальше:</b>\n"
+            f"• Приглашай друзей: <code>клан вступить {text}</code>\n"
+            f"• Пополняй казну: <code>клан казна 100000</code>\n"
+            f"• Смотри инфо: кнопка <b>👤 Мой клан</b>",
+            reply_markup=_clan_main_kb()
+        )
 
 # ============================================================
 # СЕЙФ / КЕЙСЫ
@@ -1724,17 +1991,72 @@ async def joker_callback(callback: CallbackQuery):
 
 
 # ============================================================
-# МИНЫ
+# МИНЫ V3 — СБАЛАНСИРОВАННАЯ
 # ============================================================
 mines_sessions = {}
-MINES_MULTIS = [1.0, 1.2, 1.5, 1.9, 2.4, 3.0, 3.8, 4.8, 6.0, 7.6, 9.5,
-                12.0, 15.0, 19.0, 24.0, 30.0, 38.0, 48.0, 60.0]
-MINES_BOMBS = 7
+MINES_BOMB_OPTIONS = [3, 5, 7, 10, 15, 20, 24]
+MINES_HOUSE_EDGE = 0.04  # 4% в пользу казино (справедливо)
 
 
-def get_mines_kb(session_id, revealed, exploded=False):
+def mines_multiplier(bombs: int, opened: int) -> float:
+    """Честный множитель с house edge."""
+    if opened <= 0:
+        return 1.0
+    safe = 25 - bombs
+    if opened > safe:
+        opened = safe
+    prob = 1.0
+    for i in range(opened):
+        prob *= (safe - i) / (25 - i)
+    if prob <= 0:
+        return 0
+    return round((1 / prob) * (1 - MINES_HOUSE_EDGE), 2)
+
+
+def mines_max_multiplier(bombs: int) -> float:
+    return mines_multiplier(bombs, 25 - bombs)
+
+
+def mines_risk_emoji(bombs: int) -> str:
+    if bombs <= 3: return "🟢"
+    if bombs <= 7: return "🟡"
+    if bombs <= 15: return "🟠"
+    return "🔴"
+
+
+def mines_risk_text(bombs: int) -> str:
+    if bombs <= 3: return "Низкий"
+    if bombs <= 7: return "Средний"
+    if bombs <= 15: return "Высокий"
+    return "ЭКСТРИМ"
+
+
+def get_mines_choice_kb(session_id):
     sess = mines_sessions.get(session_id)
-    bombs = sess["bomb_positions"] if sess else set()
+    if not sess:
+        return None
+    kb = []
+    for b in MINES_BOMB_OPTIONS:
+        m1 = mines_multiplier(b, 1)
+        mmax = mines_max_multiplier(b)
+        risk = mines_risk_emoji(b)
+        kb.append([InlineKeyboardButton(
+            text=f"{risk} 💣{b} — x{m1} за клетку (макс x{mmax})",
+            callback_data=f"mn_bomb_{session_id}_{b}"
+        )])
+    kb.append([InlineKeyboardButton(
+        text=f"❌ Отменить и вернуть {format_balance(sess['bet'])}",
+        callback_data=f"mn_cancel_{session_id}"
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def get_mines_grid_kb(session_id, revealed, exploded=False):
+    sess = mines_sessions.get(session_id)
+    if not sess:
+        return None
+    bombs = sess.get("bomb_positions", set())
+    bomb_count = sess.get("bombs", 0)
     kb = []
     for r in range(5):
         row = []
@@ -1753,12 +2075,42 @@ def get_mines_kb(session_id, revealed, exploded=False):
                 row.append(InlineKeyboardButton(text="⬛", callback_data=f"mn_{session_id}_{idx}"))
         kb.append(row)
     if sess and not exploded and len(revealed) > 0:
-        win_amount = int(sess["bet"] * MINES_MULTIS[len(revealed)])
+        mult = mines_multiplier(bomb_count, len(revealed))
+        win = int(sess["bet"] * mult)
         kb.append([InlineKeyboardButton(
-            text=f"💰 Забрать {format_balance(win_amount)}",
+            text=f"💰 ЗАБРАТЬ {format_balance(win)} (x{mult})",
             callback_data=f"mn_cash_{session_id}"
         )])
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def mines_status_text(sess, mention):
+    bombs = sess["bombs"]
+    lvl = len(sess["revealed"])
+    safe = 25 - bombs
+    mult = mines_multiplier(bombs, lvl)
+    cur_win = int(sess["bet"] * mult)
+    next_mult = mines_multiplier(bombs, lvl + 1) if lvl < safe else mult
+    next_win = int(sess["bet"] * next_mult)
+
+    filled = int(lvl / safe * 10) if safe > 0 else 0
+    bar = "▰" * filled + "▱" * (10 - filled)
+
+    text = (
+        f"💣 {mention}, игра идёт!\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Ставка: {format_balance(sess['bet'])}\n"
+        f"💣 Бомб: <b>{bombs}</b> ({mines_risk_emoji(bombs)} {mines_risk_text(bombs)})\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 Открыто: <b>{lvl}/{safe}</b> {bar}\n"
+        f"📊 Множитель: <b>x{mult}</b>\n"
+        f"💵 Сейчас: <b>{format_balance(cur_win)}</b>\n"
+    )
+    if lvl < safe:
+        text += f"➡️ Следующая: x{next_mult} = {format_balance(next_win)}\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"<i>Открывай клетки или забери выигрыш!</i>"
+    return text
 
 
 @router.message(F.text.lower().startswith("мины"))
@@ -1767,32 +2119,103 @@ async def game_mines(message: Message):
         return
     args = message.text.split()
     if len(args) < 2 or not args[1].isdigit():
-        await message.answer("❌ Использование: <code>мины [ставка]</code>")
+        await message.answer(
+            f"💣 <b>Мины</b> — сапёр с множителями\n\n"
+            f"📋 <b>Использование:</b> <code>мины [ставка]</code>\n"
+            f"📝 <b>Пример:</b> <code>мины 1000</code>\n\n"
+            f"🎯 <b>Как играть:</b>\n"
+            f"1️⃣ Ставишь ставку\n"
+            f"2️⃣ Выбираешь кол-во бомб (3-24)\n"
+            f"3️⃣ Открываешь клетки — множитель растёт\n"
+            f"4️⃣ Забираешь выигрыш или подрываешься\n\n"
+            f"⚠️ Мин. ставка: <b>{MIN_BET} {CURRENCY}</b>"
+        )
         return
     bet = int(args[1])
     if bet < MIN_BET:
-        await message.answer(f"Минимальная ставка {MIN_BET} {CURRENCY}")
+        await message.answer(f"❌ Минимальная ставка: <b>{MIN_BET} {CURRENCY}</b>")
         return
     user = get_user(message.from_user.id, message.from_user.first_name or "",
                     message.from_user.last_name or "", message.from_user.username or "")
     if user["balance"] < bet:
-        await message.answer("❌ Недостаточно средств")
+        await message.answer(f"❌ Недостаточно средств.\n💰 Баланс: {format_balance(user['balance'])}")
         return
     update_balance(user["user_id"], -bet)
     session_id = f"{message.from_user.id}_{message.message_id}"
-    bombs = set(random.sample(range(25), MINES_BOMBS))
     mines_sessions[session_id] = {
         "user_id": user["user_id"], "user_name": user["first_name"],
-        "bet": bet, "bomb_positions": bombs, "revealed": set()
+        "bet": bet, "bombs": 0, "bomb_positions": set(), "revealed": set(),
+        "state": "choosing"
     }
     mention = get_mention(user["user_id"], user["first_name"])
     await message.answer(
-        f"💣 {mention}, начнём Мины!\n"
-        f"💰 Ставка: {format_balance(bet)}\n"
-        f"💣 Бомб: {MINES_BOMBS} из 25\n"
-        f"💵 Текущий выигрыш: {format_balance(bet)}",
-        reply_markup=get_mines_kb(session_id, set())
+        f"💣 {mention}, выбирай сложность!\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Ставка: <b>{format_balance(bet)}</b>\n"
+        f"📊 Больше бомб = выше множитель\n"
+        f"🎯 Меньше бомб = безопаснее\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 Низкий | 🟡 Средний | 🟠 Высокий | 🔴 Экстрим\n\n"
+        f"<i>Выбери количество бомб:</i>",
+        reply_markup=get_mines_choice_kb(session_id)
     )
+
+
+@router.callback_query(F.data.startswith("mn_bomb_"))
+async def mines_bomb_chosen(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    session_id = f"{parts[2]}_{parts[3]}"
+    bombs = int(parts[4])
+    if session_id not in mines_sessions:
+        await callback.answer("Игра завершена.", show_alert=True)
+        return
+    sess = mines_sessions[session_id]
+    if sess["user_id"] != callback.from_user.id:
+        await callback.answer("❌ Чужая игра!", show_alert=True)
+        return
+    if sess.get("state") != "choosing":
+        await callback.answer("Уже выбрано!", show_alert=True)
+        return
+    bomb_set = set(random.sample(range(25), bombs))
+    sess["bombs"] = bombs
+    sess["bomb_positions"] = bomb_set
+    sess["state"] = "playing"
+    mention = get_mention(sess["user_id"], sess["user_name"])
+    safe = 25 - bombs
+    m1 = mines_multiplier(bombs, 1)
+    mmax = mines_max_multiplier(bombs)
+    await callback.message.edit_text(
+        f"💣 {mention}, игра началась!\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Ставка: {format_balance(sess['bet'])}\n"
+        f"💣 Бомб: <b>{bombs}</b> ({mines_risk_emoji(bombs)} {mines_risk_text(bombs)})\n"
+        f"💎 Безопасных: <b>{safe}</b>\n"
+        f"📊 Множитель: от x{m1} до x{mmax}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Открывай клетки — множитель растёт!</i>",
+        reply_markup=get_mines_grid_kb(session_id, set())
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mn_cancel_"))
+async def mines_cancel(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    session_id = f"{parts[2]}_{parts[3]}"
+    if session_id not in mines_sessions:
+        await callback.answer("Игра завершена.", show_alert=True)
+        return
+    sess = mines_sessions[session_id]
+    if sess["user_id"] != callback.from_user.id:
+        await callback.answer("❌ Чужая игра!", show_alert=True)
+        return
+    update_balance(sess["user_id"], sess["bet"])
+    del mines_sessions[session_id]
+    await callback.message.edit_text(
+        f"❌ <b>Игра отменена</b>\n\n"
+        f"Возвращено: <b>{format_balance(sess['bet'])}</b>"
+    )
+    await callback.answer("Отменено")
 
 
 @router.callback_query(F.data.startswith("mn_"))
@@ -1803,22 +2226,25 @@ async def mines_callback(callback: CallbackQuery):
         await callback.answer()
         return
 
+    # --- ЗАБРАТЬ ВЫИГРЫШ ---
     if parts[1] == "cash":
         session_id = f"{parts[2]}_{parts[3]}"
         if session_id not in mines_sessions:
-            await callback.answer("Игра завершена.")
+            await callback.answer("Игра завершена.", show_alert=True)
             return
         sess = mines_sessions[session_id]
         if sess["user_id"] != callback.from_user.id:
-            await callback.answer("Чужая игра!")
+            await callback.answer("❌ Чужая игра!", show_alert=True)
             return
         lvl = len(sess["revealed"])
         if lvl == 0:
             update_balance(sess["user_id"], sess["bet"])
             del mines_sessions[session_id]
-            await callback.message.edit_text("Вы забрали ставку обратно.")
+            await callback.message.edit_text(f"↩️ Вернул ставку: {format_balance(sess['bet'])}")
             return
-        win = int(sess["bet"] * MINES_MULTIS[lvl])
+        mult = mines_multiplier(sess["bombs"], lvl)
+        win = int(sess["bet"] * mult)
+        profit = win - sess["bet"]
         update_balance(sess["user_id"], win)
         with get_db() as conn:
             with conn.cursor() as cursor:
@@ -1826,66 +2252,96 @@ async def mines_callback(callback: CallbackQuery):
                 conn.commit()
         del mines_sessions[session_id]
         mention = get_mention(sess["user_id"], sess["user_name"])
-        await callback.message.edit_text(f"💰 {mention} забрал <b>{format_balance(win)}</b>!")
+        await callback.message.edit_text(
+            f"💰 <b>{mention} забрал выигрыш!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💣 Бомб: {sess['bombs']}\n"
+            f"💎 Открыто: {lvl}/{25-sess['bombs']}\n"
+            f"📊 Множитель: <b>x{mult}</b>\n"
+            f"💵 Ставка: {format_balance(sess['bet'])}\n"
+            f"💰 Выигрыш: <b>{format_balance(win)}</b>\n"
+            f"📈 Профит: <b>+{format_balance(profit)}</b>"
+        )
         return
 
+    # --- ОТКРЫТЬ КЛЕТКУ ---
     session_id = f"{parts[1]}_{parts[2]}"
     idx = int(parts[3])
     if session_id not in mines_sessions:
-        await callback.answer("Игра завершена.")
+        await callback.answer("Игра завершена.", show_alert=True)
         return
     sess = mines_sessions[session_id]
     if sess["user_id"] != callback.from_user.id:
-        await callback.answer("Чужая игра!")
+        await callback.answer("❌ Чужая игра!", show_alert=True)
         return
     if idx in sess["revealed"]:
-        await callback.answer("Клетка уже открыта!")
+        await callback.answer("Клетка уже открыта!", show_alert=True)
         return
     mention = get_mention(sess["user_id"], sess["user_name"])
 
+    # Проклятие (25% шанс подмены безопасной на бомбу)
     if is_cursed(callback.from_user.id) and random.random() < 0.25:
         if idx not in sess["bomb_positions"]:
             idx = random.choice(list(sess["bomb_positions"]))
 
+    # --- ПОДРЫВ ---
     if idx in sess["bomb_positions"]:
         sess["revealed"].add(idx)
-        kb = get_mines_kb(session_id, sess["revealed"], exploded=True)
+        kb = get_mines_grid_kb(session_id, sess["revealed"], exploded=True)
         bet = sess["bet"]
+        bombs = sess["bombs"]
+        lvl = len(sess["revealed"]) - 1
         del mines_sessions[session_id]
         with get_db() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE users SET games_played = games_played + 1 WHERE user_id = %s", (sess["user_id"],))
                 conn.commit()
         await callback.message.edit_text(
-            f"💥 {mention}, вы подорвались!\nПроиграно: <b>{format_balance(bet)}</b>",
+            f"💥 <b>{mention}, подорвался!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💣 Бомб: {bombs}\n"
+            f"💎 Открыто: {lvl} клеток\n"
+            f"💸 Проиграно: <b>{format_balance(bet)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>Повезёт в следующий раз!</i>",
             reply_markup=kb
         )
         return
 
+    # --- ОТКРЫЛИ БЕЗОПАСНУЮ ---
     sess["revealed"].add(idx)
     lvl = len(sess["revealed"])
-    if lvl >= 18:
-        win = int(sess["bet"] * MINES_MULTIS[18])
+    bombs = sess["bombs"]
+    safe = 25 - bombs
+
+    # --- ДЖЕКПОТ ---
+    if lvl >= safe:
+        mult = mines_multiplier(bombs, lvl)
+        win = int(sess["bet"] * mult)
         update_balance(sess["user_id"], win)
-        kb = get_mines_kb(session_id, sess["revealed"], exploded=True)
+        kb = get_mines_grid_kb(session_id, sess["revealed"], exploded=True)
         del mines_sessions[session_id]
         with get_db() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE users SET games_played = games_played + 1, games_won = games_won + 1 WHERE user_id = %s", (sess["user_id"],))
                 conn.commit()
         await callback.message.edit_text(
-            f"🎉 {mention}, вы открыли всё!\nВыигрыш: <b>{format_balance(win)}</b>",
+            f"🎉🎉🎉 <b>ДЖЕКПОТ!!!</b> 🎉🎉🎉\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏆 {mention} открыл ВСЁ поле!\n"
+            f"💣 Бомб: {bombs}\n"
+            f"💎 Открыто: {lvl}/{safe} — 100%!\n"
+            f"📊 Множитель: <b>x{mult}</b>\n"
+            f"💰 Выигрыш: <b>{format_balance(win)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━",
             reply_markup=kb
         )
         return
 
-    cur_win = int(sess["bet"] * MINES_MULTIS[lvl])
+    # --- ПРОДОЛЖЕНИЕ ---
     await callback.message.edit_text(
-        f"💣 {mention}, продолжаем!\n"
-        f"💰 Ставка: {format_balance(sess['bet'])}\n"
-        f"🔍 Открыто: {lvl}/18\n"
-        f"💵 Текущий выигрыш: {format_balance(cur_win)}",
-        reply_markup=get_mines_kb(session_id, sess["revealed"])
+        mines_status_text(sess, mention),
+        reply_markup=get_mines_grid_kb(session_id, sess["revealed"])
     )
 
 
