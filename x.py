@@ -1746,11 +1746,11 @@ def get_mines_kb(session_id, revealed, exploded=False):
                 elif idx in revealed:
                     row.append(InlineKeyboardButton(text="💎", callback_data="mn_noop"))
                 else:
-                    row.append(InlineKeyboardButton(text="⬜", callback_data="mn_noop"))
+                    row.append(InlineKeyboardButton(text="⬛", callback_data="mn_noop"))
             elif idx in revealed:
                 row.append(InlineKeyboardButton(text="💎", callback_data="mn_noop"))
             else:
-                row.append(InlineKeyboardButton(text="⬜", callback_data=f"mn_{session_id}_{idx}"))
+                row.append(InlineKeyboardButton(text="⬛", callback_data=f"mn_{session_id}_{idx}"))
         kb.append(row)
     if sess and not exploded and len(revealed) > 0:
         win_amount = int(sess["bet"] * MINES_MULTIS[len(revealed)])
@@ -2489,53 +2489,72 @@ async def cmd_admh_dot(message: Message):
 # ============================================================
 # 🛡 АДМИН-ПАНЕЛЬ
 # ============================================================
-def _check_admin(event) -> bool:
-    if hasattr(event, "from_user") and event.from_user:
-        return is_admin(event.from_user.id)
-    return False
-
-
-def _back_kb(extra_rows=None, back_to="adm:main"):
-    rows = list(extra_rows) if extra_rows else []
-    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_to)])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def _admin_main_text(uid):
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM users")
-            users_cnt = cursor.fetchone()[0]
-            cursor.execute("SELECT COALESCE(SUM(balance),0) FROM users")
-            total_bal = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*), COALESCE(SUM(balance),0), COALESCE(AVG(balance),0) FROM users")
+            users_cnt, total_bal, avg_bal = cursor.fetchone()
             cursor.execute("SELECT COUNT(*) FROM users WHERE is_banned = TRUE")
             banned = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM users WHERE vip_until > NOW()")
+            vips = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM clans")
+            clans_cnt = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM promocodes WHERE uses > 0")
+            promos_cnt = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM disabled_games")
+            disabled_cnt = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM deposits")
+            deps_cnt = cursor.fetchone()[0]
+            cursor.execute("SELECT COALESCE(SUM(games_played),0) FROM users")
+            total_games = cursor.fetchone()[0]
+
+    status = "🔴 ТЕХ.РАБОТЫ" if disabled_cnt > 0 else "🟢 РАБОТАЕТ"
+
     return (
         f"🛡 <b>АДМИН-ПАНЕЛЬ {BOT_NAME}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 Ты: {get_rank_emoji(get_rank(uid))}\n"
-        f"👥 Пользователей: <b>{users_cnt}</b>\n"
-        f"💰 Общий баланс: <b>{format_balance(total_bal)}</b>\n"
-        f"🚫 Забанено: <b>{banned}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Выбери раздел:</i>"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>{get_rank_emoji(get_rank(uid))}</b>\n"
+        f"📡 Статус: <b>{status}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Юзеров: <b>{users_cnt}</b>\n"
+        f"💰 Баланс: <b>{format_balance(total_bal)}</b>\n"
+        f"📊 Средний: <b>{format_balance(int(avg_bal))}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚜️ VIP: <b>{vips}</b> | 🚫 Бан: <b>{banned}</b>\n"
+        f"🏰 Кланов: <b>{clans_cnt}</b> | 🎁 Промо: <b>{promos_cnt}</b>\n"
+        f"🏦 Депозитов: <b>{deps_cnt}</b> | 🎮 Игр: <b>{total_games}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Выбери раздел ↓</i>"
     )
 
 
 def _admin_main_kb(uid):
     rows = [
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users"),
-         InlineKeyboardButton(text="💰 Экономика", callback_data="adm:econ")],
+         InlineKeyboardButton(text="🔍 Поиск по нику", callback_data="adm:search")],
+        [InlineKeyboardButton(text="💰 Экономика", callback_data="adm:econ"),
+         InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats")],
+        [InlineKeyboardButton(text="📈 Аналитика", callback_data="adm:analytics"),
+         InlineKeyboardButton(text="🏆 Лидерборд", callback_data="adm:leaderboard")],
         [InlineKeyboardButton(text="🎁 Промокоды", callback_data="adm:promos"),
-         InlineKeyboardButton(text="🎮 Игры", callback_data="adm:games")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats"),
+         InlineKeyboardButton(text="📦 Выдать предмет", callback_data="adm:giveitem")],
+        [InlineKeyboardButton(text="🎁 Массовая раздача", callback_data="adm:massgift"),
+         InlineKeyboardButton(text="💎 VIP-управление", callback_data="adm:vipmgr")],
+        [InlineKeyboardButton(text="🎮 Игры", callback_data="adm:games"),
+         InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings")],
+        [InlineKeyboardButton(text="🏰 Кланы", callback_data="adm:clans"),
+         InlineKeyboardButton(text="⛏️ Майнинг", callback_data="adm:mining")],
+        [InlineKeyboardButton(text="🏦 Депозиты", callback_data="adm:deposits"),
          InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings"),
-         InlineKeyboardButton(text="🚫 Баны", callback_data="adm:bans")],
+        [InlineKeyboardButton(text="📤 В канал", callback_data="adm:tochannel"),
+         InlineKeyboardButton(text="⏸ Тех.работы", callback_data="adm:maintenance")],
+        [InlineKeyboardButton(text="🚫 Баны", callback_data="adm:bans"),
+         InlineKeyboardButton(text="🔄 Сбросы", callback_data="adm:resets")],
         [InlineKeyboardButton(text="📜 Логи", callback_data="adm:logs"),
          InlineKeyboardButton(text="💾 Бэкап", callback_data="adm:backup")],
         [InlineKeyboardButton(text="🛡 Админы", callback_data="adm:admins"),
-         InlineKeyboardButton(text="📋 Справка /admh", callback_data="adm:help")],
+         InlineKeyboardButton(text="📋 Справка", callback_data="adm:help")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -3132,6 +3151,435 @@ async def adm_unadmin(callback: CallbackQuery):
     await callback.answer("Снят")
     await adm_admins(callback)
 
+# ============================================================
+# 🆕 НОВЫЕ РАЗДЕЛЫ АДМИН-ПАНЕЛИ
+# ============================================================
+
+# ---------- 🔍 ПОИСК ПО НИКУ ----------
+@router.callback_query(F.data == "adm:search")
+async def adm_search(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    admin_states[callback.from_user.id] = {"action": "search_nick"}
+    await callback.message.edit_text(
+        "🔍 <b>Поиск по нику</b>\n\n"
+        "Введи часть имени или ника игрока (мин 2 символа):\n\n"
+        "<i>Для отмены: /cancel</i>",
+        reply_markup=_back_kb()
+    )
+    await callback.answer()
+
+
+# ---------- 📈 АНАЛИТИКА ----------
+@router.callback_query(F.data == "adm:analytics")
+async def adm_analytics(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COALESCE(SUM(games_played),0), COALESCE(SUM(games_won),0) FROM users")
+            gp, gw = cursor.fetchone()
+            today = datetime.now().strftime("%Y-%m-%d")
+            cursor.execute("SELECT COUNT(*) FROM daily_tasks WHERE date = %s", (today,))
+            active_today = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM roulette_log WHERE roll IS NOT NULL")
+            total_rolls = cursor.fetchone()[0]
+            cursor.execute("SELECT user_id, SUM(win_amount) FROM roulette_log WHERE win_amount > 0 GROUP BY user_id ORDER BY SUM(win_amount) DESC LIMIT 5")
+            top_roulette = cursor.fetchall()
+            cursor.execute("SELECT user_id, win_amount FROM roulette_log WHERE win_amount > 0 ORDER BY win_amount DESC LIMIT 1")
+            big_win = cursor.fetchone()
+            cursor.execute("SELECT COUNT(*) FROM users WHERE last_daily = %s", (today,))
+            daily_today = cursor.fetchone()[0]
+    win_rate = round(gw / gp * 100, 1) if gp > 0 else 0
+
+    text = (
+        f"📈 <b>Аналитика {BOT_NAME}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎮 Всего игр: <b>{gp}</b>\n"
+        f"🏆 Побед: <b>{gw}</b>\n"
+        f"📊 Винрейт: <b>{win_rate}%</b>\n"
+        f"👥 Активных сегодня: <b>{daily_today}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎰 <b>Рулетка:</b>\n"
+        f"🎲 Всего прокрутов: <b>{total_rolls}</b>\n"
+    )
+    if big_win:
+        bw_user = get_user(big_win[0])
+        text += f"🎯 Крупнейший выигрыш: <b>{format_balance(big_win[1])}</b> ({clean_first_name(bw_user['first_name'], big_win[0])})\n"
+
+    if top_roulette:
+        text += f"\n💰 <b>ТОП-5 по выигрышам в рулетке:</b>\n"
+        for i, (uid, wins) in enumerate(top_roulette, 1):
+            u = get_user(uid)
+            text += f"{i}. {clean_first_name(u['first_name'], uid)} — <b>{format_balance(wins)}</b>\n"
+
+    await callback.message.edit_text(text, reply_markup=_back_kb())
+    await callback.answer()
+
+
+# ---------- 🎁 МАССОВАЯ РАЗДАЧА ----------
+@router.callback_query(F.data == "adm:massgift")
+async def adm_massgift(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📦 Кейсы всем", callback_data="adm:mg:case"),
+         InlineKeyboardButton(text="👑 VIP всем", callback_data="adm:mg:vip")],
+        [InlineKeyboardButton(text="💎 BTC всем", callback_data="adm:mg:btc")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")]
+    ])
+    await callback.message.edit_text(
+        "🎁 <b>Массовая раздача</b>\n\n"
+        "Выбери что раздать <b>ВСЕМ</b> игрокам:\n\n"
+        "⚠️ <i>Действие необратимо</i>",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm:mg:case")
+async def adm_mg_case(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    cases = ["деревянный", "железный", "золотой", "алмазный", "легендарный", "мифический", "космический"]
+    kb = [[InlineKeyboardButton(text=c, callback_data=f"adm:mg_do_case:{c}")] for c in cases]
+    kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm:massgift")])
+    await callback.message.edit_text(
+        "📦 <b>Кейсы всем</b>\n\nВыбери тип кейса:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:mg_do_case:"))
+async def adm_mg_do_case(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    case_type = callback.data.split(":")[2]
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT user_id FROM users")
+            users = [r[0] for r in cursor.fetchall()]
+            for uid in users:
+                cursor.execute(
+                    "INSERT INTO cases_inventory (user_id, case_type, count) VALUES (%s, %s, 1) "
+                    "ON CONFLICT (user_id, case_type) DO UPDATE SET count = cases_inventory.count + 1",
+                    (uid, case_type))
+            conn.commit()
+    log_admin_action(callback.from_user.id, f"massgift case {case_type} to {len(users)}")
+    await callback.answer(f"✅ {case_type} выдан {len(users)} юзерам", show_alert=True)
+    await adm_massgift(callback)
+
+
+@router.callback_query(F.data == "adm:mg:vip")
+async def adm_mg_vip(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="24 часа", callback_data="adm:mg_do_vip:24"),
+         InlineKeyboardButton(text="72 часа", callback_data="adm:mg_do_vip:72")],
+        [InlineKeyboardButton(text="7 дней", callback_data="adm:mg_do_vip:168"),
+         InlineKeyboardButton(text="30 дней", callback_data="adm:mg_do_vip:720")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:massgift")]
+    ])
+    await callback.message.edit_text(
+        "👑 <b>VIP всем</b>\n\nВыбери срок:",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:mg_do_vip:"))
+async def adm_mg_do_vip(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    hours = int(callback.data.split(":")[2])
+    new_until = datetime.now() + timedelta(hours=hours)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET vip_until = GREATEST(COALESCE(vip_until, NOW()), %s)", (new_until,))
+            conn.commit()
+    log_admin_action(callback.from_user.id, f"massgift vip {hours}h")
+    await callback.answer(f"✅ VIP на {hours}ч всем выдан", show_alert=True)
+    await adm_massgift(callback)
+
+
+@router.callback_query(F.data == "adm:mg:btc")
+async def adm_mg_btc(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    admin_states[callback.from_user.id] = {"action": "massgift_btc"}
+    await callback.message.edit_text(
+        "💎 <b>BTC всем</b>\n\n"
+        "Введи количество BTC для каждого юзера (например 0.001):\n\n"
+        "<i>Для отмены: /cancel</i>",
+        reply_markup=_back_kb(back_to="adm:massgift")
+    )
+    await callback.answer()
+
+
+# ---------- 💎 VIP-УПРАВЛЕНИЕ ----------
+@router.callback_query(F.data == "adm:vipmgr")
+async def adm_vipmgr(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT user_id, first_name, vip_until FROM users WHERE vip_until > NOW() ORDER BY vip_until LIMIT 30")
+            rows = cursor.fetchall()
+    text = f"💎 <b>VIP-управление</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"👑 Активных VIP: <b>{len(rows)}</b>\n\n"
+    buttons = []
+    for uid, fname, until in rows:
+        until_str = until.strftime("%d.%m.%Y %H:%M") if until else "—"
+        text += f"• {clean_first_name(fname, uid)} — до {until_str}\n"
+        buttons.append([InlineKeyboardButton(text=f"❌ Снять {fname}", callback_data=f"adm:viprm:{uid}")])
+    if rows:
+        buttons.append([InlineKeyboardButton(text="❌ Снять ВСЕХ ⚠️", callback_data="adm:viprmall")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:viprm:"))
+async def adm_viprm(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    uid = int(callback.data.split(":")[2])
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET vip_until = NULL WHERE user_id = %s", (uid,))
+            conn.commit()
+    log_admin_action(callback.from_user.id, f"viprm {uid}")
+    await callback.answer("✅ VIP снят", show_alert=True)
+    await adm_vipmgr(callback)
+
+
+@router.callback_query(F.data == "adm:viprmall")
+async def adm_viprmall(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET vip_until = NULL WHERE vip_until IS NOT NULL")
+            conn.commit()
+    log_admin_action(callback.from_user.id, "viprmall")
+    await callback.answer("✅ Все VIP сняты", show_alert=True)
+    await adm_vipmgr(callback)
+
+
+# ---------- ⛏️ МАЙНИНГ ----------
+@router.callback_query(F.data == "adm:mining")
+async def adm_mining(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(DISTINCT user_id) FROM miners")
+            miners_cnt = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM miners")
+            total_cards = cursor.fetchone()[0]
+            cursor.execute("SELECT card_type, SUM(count) FROM miners GROUP BY card_type ORDER BY SUM(count) DESC")
+            by_type = cursor.fetchall()
+            cursor.execute("SELECT user_id, SUM(count) as cnt FROM miners GROUP BY user_id ORDER BY cnt DESC LIMIT 5")
+            top = cursor.fetchall()
+    text = (
+        f"⛏️ <b>Майнинг</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Майнеров: <b>{miners_cnt}</b>\n"
+        f"🎮 Всего карт: <b>{total_cards}</b>\n\n"
+        f"<b>По типам:</b>\n"
+    )
+    for card, cnt in by_type:
+        text += f"• {card}: <b>{cnt}</b>\n"
+    if top:
+        text += f"\n🏆 <b>ТОП-5 майнеров:</b>\n"
+        for uid, cnt in top:
+            u = get_user(uid)
+            text += f"• {clean_first_name(u['first_name'], uid)} — <b>{cnt}</b> карт\n"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Сбросить ВСЕ фермы ⚠️", callback_data="adm:mining_reset")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm:mining_reset")
+async def adm_mining_reset(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM miners")
+            cursor.execute("UPDATE mining_stats SET accumulated_btc = 0")
+            conn.commit()
+    log_admin_action(callback.from_user.id, "mining_reset_all")
+    await callback.answer("✅ Все фермы сброшены", show_alert=True)
+    await adm_mining(callback)
+
+
+# ---------- 🏦 ДЕПОЗИТЫ ----------
+@router.callback_query(F.data == "adm:deposits")
+async def adm_deposits(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT user_id, amount, start_time FROM deposits ORDER BY amount DESC LIMIT 30")
+            rows = cursor.fetchall()
+    if not rows:
+        await callback.message.edit_text("🏦 <b>Активных депозитов нет.</b>", reply_markup=_back_kb())
+        await callback.answer()
+        return
+    total = sum(r[1] for r in rows)
+    text = f"🏦 <b>Депозиты</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"📊 Всего: <b>{len(rows)}</b> | Сумма: <b>{format_balance(total)}</b>\n\n"
+    for uid, amt, start in rows[:15]:
+        u = get_user(uid)
+        interest = deposit_interest(start, amt)
+        text += f"• {clean_first_name(u['first_name'], uid)} — {format_balance(amt)} (+{format_balance(interest)})\n"
+    await callback.message.edit_text(text, reply_markup=_back_kb())
+    await callback.answer()
+
+
+# ---------- 📤 В КАНАЛ ----------
+@router.callback_query(F.data == "adm:tochannel")
+async def adm_tochannel(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    admin_states[callback.from_user.id] = {"action": "tochannel_text"}
+    await callback.message.edit_text(
+        f"📤 <b>Пост в канал</b>\n\n"
+        f"Канал: <a href='{CHANNEL_URL}'>{CHANNEL_URL}</a>\n\n"
+        f"Отправь текст поста (HTML поддерживается):\n\n"
+        f"<i>Для отмены: /cancel</i>",
+        reply_markup=_back_kb()
+    )
+    await callback.answer()
+
+
+# ---------- 🔄 СБРОСЫ ----------
+@router.callback_query(F.data == "adm:resets")
+async def adm_resets(callback: CallbackQuery):
+    if not _check_admin(callback):
+        return
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Сброс статистики (игр/побед)", callback_data="adm:reset_stats"),
+         InlineKeyboardButton(text="📅 Сброс ежедневок", callback_data="adm:reset_daily")],
+        [InlineKeyboardButton(text="📦 Сброс кейсов", callback_data="adm:reset_cases"),
+         InlineKeyboardButton(text="⛏️ Сброс майнеров", callback_data="adm:reset_mining")],
+        [InlineKeyboardButton(text="💰 Сброс ВСЕХ балансов ⚠️", callback_data="adm:reset_balances")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")]
+    ])
+    await callback.message.edit_text(
+        "🔄 <b>Сбросы</b>\n\n"
+        "Выбери что сбросить <b>у всех</b> игроков:\n\n"
+        "⚠️ <i>Действия необратимы</i>",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm:reset_stats")
+async def adm_reset_stats(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET games_played = 0, games_won = 0")
+            conn.commit()
+    log_admin_action(callback.from_user.id, "reset_stats_all")
+    await callback.answer("✅ Статистика сброшена", show_alert=True)
+
+
+@router.callback_query(F.data == "adm:reset_daily")
+async def adm_reset_daily(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET last_daily = NULL")
+            cursor.execute("DELETE FROM daily_tasks WHERE date < %s", (datetime.now().strftime("%Y-%m-%d"),))
+            conn.commit()
+    log_admin_action(callback.from_user.id, "reset_daily_all")
+    await callback.answer("✅ Ежедневки сброшены", show_alert=True)
+
+
+@router.callback_query(F.data == "adm:reset_cases")
+async def adm_reset_cases(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM cases_inventory")
+            conn.commit()
+    log_admin_action(callback.from_user.id, "reset_cases_all")
+    await callback.answer("✅ Все кейсы удалены", show_alert=True)
+
+
+@router.callback_query(F.data == "adm:reset_mining")
+async def adm_reset_mining(callback: CallbackQuery):
+    if not is_head_or_above(callback.from_user.id):
+        await callback.answer("Только Head+", show_alert=True)
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM miners")
+            cursor.execute("UPDATE mining_stats SET accumulated_btc = 0")
+            conn.commit()
+    log_admin_action(callback.from_user.id, "reset_mining_all")
+    await callback.answer("✅ Все фермы сброшены", show_alert=True)
+
+
+@router.callback_query(F.data == "adm:reset_balances")
+async def adm_reset_balances_confirm(callback: CallbackQuery):
+    if not is_owner(callback.from_user.id):
+        await callback.answer("Только владелец!", show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ ДА, сбросить всем 4000", callback_data="adm:reset_bal_yes")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="adm:resets")]
+    ])
+    await callback.message.edit_text(
+        "⚠️ <b>ВНИМАНИЕ!</b>\n\n"
+        "Сбросить балансы <b>ВСЕХ</b> игроков до <b>4000 COINS</b>?\n\n"
+        "Это <b>НЕОБРАТИМО</b>!",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm:reset_bal_yes")
+async def adm_reset_bal_yes(callback: CallbackQuery):
+    if not is_owner(callback.from_user.id):
+        return
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET balance = 4000")
+            conn.commit()
+    log_admin_action(callback.from_user.id, "reset_balances_all")
+    await callback.answer("✅ Все балансы сброшены до 4000", show_alert=True)
+    await adm_main(callback)
 
 # ============================================================
 # STATE-ОБРАБОТЧИК (ввод от админа)
@@ -3284,6 +3732,69 @@ async def admin_state_handler(message: Message):
             log_admin_action(uid, f"mass_give {amount}")
             admin_states.pop(uid, None)
             await message.answer(f"✅ Всем начислено {format_balance(amount)}", reply_markup=_admin_main_kb(uid))
+
+        elif action == "search_nick":
+            if len(text) < 2:
+                await message.answer("❌ Минимум 2 символа. Или /cancel.")
+                return
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT user_id, first_name, username, balance FROM users
+                        WHERE LOWER(first_name) LIKE LOWER(%s)
+                           OR LOWER(custom_nick) LIKE LOWER(%s)
+                           OR LOWER(username) LIKE LOWER(%s)
+                        ORDER BY balance DESC LIMIT 15
+                    """, (f"%{text}%", f"%{text}%", f"%{text}%"))
+                    matches = cursor.fetchall()
+            if not matches:
+                await message.answer(f"❌ По запросу «{text}» никого не найдено. Попробуй снова или /cancel.")
+                return
+            admin_states.pop(uid, None)
+            text_out = f"🔍 <b>Результаты: «{text}»</b>\n\n"
+            buttons = []
+            for m_uid, fname, uname, bal in matches:
+                text_out += f"• {clean_first_name(fname, m_uid)} (@{uname or '—'}) — {format_balance(bal)}\n"
+                buttons.append([InlineKeyboardButton(
+                    text=f"{fname or m_uid} — {format_balance(bal)}",
+                    callback_data=f"adm:user:{m_uid}"
+                )])
+            buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")])
+            await message.answer(text_out, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+        elif action == "tochannel_text":
+            try:
+                await bot.send_message(CHANNEL_URL.replace("https://t.me/", "@"), text)
+                log_admin_action(uid, "tochannel")
+                admin_states.pop(uid, None)
+                await message.answer(
+                    f"✅ <b>Пост отправлен в канал!</b>\n\n"
+                    f"🔗 {CHANNEL_URL}",
+                    reply_markup=_admin_main_kb(uid)
+                )
+            except Exception as e:
+                await message.answer(f"❌ Ошибка отправки: {e}\n\nПроверь, что бот админ канала.")
+
+        elif action == "massgift_btc":
+            try:
+                btc_amt = float(text.replace(",", "."))
+            except:
+                await message.answer("❌ Введи число (например 0.001).")
+                return
+            if btc_amt <= 0:
+                await message.answer("❌ Должно быть > 0.")
+                return
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("UPDATE users SET btc = btc + %s", (btc_amt,))
+                    conn.commit()
+            log_admin_action(uid, f"massgift_btc {btc_amt}")
+            admin_states.pop(uid, None)
+            await message.answer(
+                f"✅ Всем выдано по <b>{btc_amt:.8f} BTC</b>\n"
+                f"~{format_balance(btc_to_coins(btc_amt))} каждому",
+                reply_markup=_admin_main_kb(uid)
+            )
 
         else:
             admin_states.pop(uid, None)
