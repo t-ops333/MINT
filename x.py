@@ -2721,7 +2721,7 @@ def rob_main_menu_kb(user_id: int):
         if cd > 0:
             label += " ⏳"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"rob:do:{key}")])
-    rows.append([InlineKeyboardButton(text="🎒 Инвентарь", callback_data="rob:inventory"),
+        rows.append([InlineKeyboardButton(text="🎒 Инвентарь", callback_data="rob:inventory"),
                  InlineKeyboardButton(text="🛒 Магазин", callback_data="rob:shop")])
     rows.append([InlineKeyboardButton(text="📖 Гайд", callback_data="rob:guide")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -6388,6 +6388,11 @@ def admin_panel_kb(uid):
             InlineKeyboardButton(text="🎁 Промокоды", callback_data="adm:promo"),
             InlineKeyboardButton(text="📦 Выдать кейс", callback_data="adm:give_case"),
         ])
+        # 👇 ВОТ ЭТА НОВАЯ СТРОКА С ВЫДАЧЕЙ ПРЕДМЕТА 👇
+        rows.append([
+            InlineKeyboardButton(text="📦 Выдать предмет", callback_data="adm:give_item"),
+        ])
+        # 👆 ---------------------------------------------- 👆
         rows.append([
             InlineKeyboardButton(text="👑 Выдать VIP", callback_data="adm:give_vip"),
             InlineKeyboardButton(text="💎 Выдать BTC", callback_data="adm:give_btc"),
@@ -6408,7 +6413,6 @@ def admin_panel_kb(uid):
         ])
     rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="adm:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
@@ -6929,6 +6933,77 @@ async def adm_broadcast_start(cb: CallbackQuery):
     )
     await cb.answer()
 
+# ============================================================
+# 📦 ВЫДАТЬ ПРЕДМЕТ (Админ)
+# ============================================================
+
+@router.callback_query(F.data == "adm:give_item")
+async def adm_give_item_start(cb: CallbackQuery):
+    if not is_spadmin_or_above(cb.from_user.id):
+        return await cb.answer("❌ Доступно только SPADMIN+", show_alert=True)
+    admin_states[cb.from_user.id] = {"action": "adm_give_item_target"}
+    await cb.message.edit_text(
+        "📦 <b>ВЫДАТЬ ПРЕДМЕТ</b>\n\n"
+        "Отправь ID или @username игрока:\n"
+        "<i>Для отмены: /cancel</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")]
+        ])
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("give:"))
+async def adm_give_item_process(cb: CallbackQuery):
+    uid = cb.from_user.id
+    state = admin_states.get(uid)
+    if not state or state.get("action") != "adm_give_item_choose":
+        return await cb.answer("Сессия истекла, начни заново.", show_alert=True)
+
+    target_id = state["target_id"]
+    parts = cb.data.split(":")
+    item_category, item_name = parts[1], parts[2]
+
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                if item_category == "case":
+                    cursor.execute(
+                        "INSERT INTO cases_inventory (user_id, case_type, count) VALUES (%s, %s, 1) "
+                        "ON CONFLICT (user_id, case_type) DO UPDATE SET count = cases_inventory.count + 1",
+                        (target_id, item_name))
+                    item_text = f"Кейс «{item_name}»"
+                elif item_category == "card":
+                    cursor.execute(
+                        "INSERT INTO miners (user_id, card_type, count) VALUES (%s, %s, 1) "
+                        "ON CONFLICT (user_id, card_type) DO UPDATE SET count = miners.count + 1",
+                        (target_id, item_name))
+                    item_text = f"Карта «{item_name}»"
+                elif item_category == "tool":
+                    cursor.execute(
+                        "INSERT INTO rob_inventory (user_id, item_type, count) VALUES (%s, %s, 1) "
+                        "ON CONFLICT (user_id, item_type) DO UPDATE SET count = rob_inventory.count + 1",
+                        (target_id, item_name))
+                    item_text = f"Инструмент «{ROB_TOOLS[item_name]['name']}»"
+                else:
+                    return await cb.answer("Неизвестная категория", show_alert=True)
+                conn.commit()
+
+        log_admin_action(uid, f"give_{item_category}", target_id=target_id)
+        admin_states.pop(uid, None)
+
+        await cb.message.edit_text(
+            f"✅ <b>Выдано!</b>\n\n"
+            f"👤 Игрок: <code>{target_id}</code>\n"
+            f"🎁 Предмет: {item_text}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ В меню", callback_data="adm:main")]
+            ])
+        )
+        await cb.answer("Выдано!")
+    except Exception as e:
+        logging.error(f"give_item error: {e}")
+        await cb.answer("❌ Ошибка БД", show_alert=True)
 
 # ============================================================
 # 🛡 УПРАВЛЕНИЕ АДМИНАМИ (head+)
@@ -7345,6 +7420,30 @@ async def cmd_online(message: Message):
 # ============================================================
 # 🔧 ОБРАБОТЧИК СОСТОЯНИЙ (ввод от админа)
 # ============================================================
+
+    # --- ВЫДАЧА ПРЕДМЕТА: ввод юзера ---
+    if action == "adm_give_item_target":
+        target = find_user_by_identifier(text)
+        if not target:
+            return await message.answer("❌ Игрок не найден. Попробуй ещё раз или /cancel")
+
+        admin_states[uid] = {"action": "adm_give_item_choose", "target_id": target["user_id"]}
+
+        kb = []
+        for case in CASE_TYPES.keys():
+            kb.append([InlineKeyboardButton(text=f"📦 Кейс: {case}", callback_data=f"give:case:{case}")])
+        for card in MINING_PRICES.keys():
+            kb.append([InlineKeyboardButton(text=f"💻 Карта: {card}", callback_data=f"give:card:{card}")])
+        for tool_key, tool_data in ROB_TOOLS.items():
+            kb.append([InlineKeyboardButton(text=f"{tool_data['emoji']} {tool_data['name']}", callback_data=f"give:tool:{tool_key}")])
+        kb.append([InlineKeyboardButton(text="❌ Отмена", callback_data="adm:main")])
+
+        await message.answer(
+            f"📦 Выдаём: <b>{target['first_name']}</b> (<code>{target['user_id']}</code>)\n\n"
+            f"Шаг 2/2: Выбери предмет:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+        )
+        return
 
 @router.message(F.text, lambda m: m.from_user.id in admin_states)
 async def admin_state_handler(message: Message):
