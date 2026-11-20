@@ -472,7 +472,7 @@ def get_user_link(user_id: int, first_name=None, username=None,
     name = get_display_name(user_id, first_name, username, custom_nick)
     safe = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     link = f'<a href="tg://user?id={user_id}">{safe}</a>'
-    if show_id:
+    if show_id and not name.startswith("id"):
         link += f" <code>({user_id})</code>"
     return link
 
@@ -1211,15 +1211,86 @@ async def cmd_top(message: Message):
         await message.answer("🏆 Топ пуст.")
         return
 
+    # Подтягиваем имена для тех, у кого их нет в БД
+    resolved = []
+    for uid, fname, bal, uname, nick in rows:
+        if not fname or fname == "Игрок":
+            try:
+                chat = await bot.get_chat(uid)
+                new_fname = getattr(chat, "first_name", "") or ""
+                new_uname = getattr(chat, "username", "") or ""
+                if new_fname or new_uname:
+                    with get_db() as conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute(
+                                "UPDATE users SET first_name = %s, username = %s WHERE user_id = %s",
+                                (new_fname or None, new_uname or None, uid))
+                            conn.commit()
+                    fname = new_fname or fname
+                    uname = new_uname or uname
+            except Exception as e:
+                logging.warning(f"get_chat failed for {uid}: {e}")
+        resolved.append((uid, fname, bal, uname, nick))
+
     admin_viewer = is_admin(message.from_user.id)
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    text = f"🏆 <b>Топ {len(rows)} игроков:</b>\n\n"
+    text = f"🏆 <b>Топ {len(resolved)} игроков:</b>\n\n"
 
-    for i, (uid, fname, bal, uname, nick) in enumerate(rows, 1):
+    for i, (uid, fname, bal, uname, nick) in enumerate(resolved, 1):
         link = get_user_link(uid, fname, uname, nick, show_id=admin_viewer)
         text += f"{medals.get(i, f'{i}.')} {link} — <b>{format_balance(bal)}</b>\n"
 
-    await message.answer(text) 
+    await message.answer(text)
+
+@router.message(Command("resolve_names"))
+async def cmd_resolve_names(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Только владелец.")
+        return
+
+    await message.answer("🔍 Ищу юзеров без имён...")
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT user_id FROM users WHERE first_name IS NULL OR first_name = 'Игрок' OR first_name = ''"
+            )
+            uids = [r[0] for r in cursor.fetchall()]
+
+    if not uids:
+        await message.answer("✅ Все имена уже в порядке.")
+        return
+
+    updated = 0
+    failed = 0
+    for uid in uids:
+        try:
+            chat = await bot.get_chat(uid)
+            new_fname = getattr(chat, "first_name", "") or ""
+            new_uname = getattr(chat, "username", "") or ""
+            if new_fname or new_uname:
+                with get_db() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE users SET first_name = %s, username = %s WHERE user_id = %s",
+                            (new_fname or None, new_uname or None, uid))
+                        conn.commit()
+                updated += 1
+            else:
+                failed += 1
+        except Exception as e:
+            logging.warning(f"get_chat failed for {uid}: {e}")
+            failed += 1
+        await asyncio.sleep(0.05)  # антирейт-лимит
+
+    await message.answer(
+        f"✅ <b>Готово!</b>\n\n"
+        f"👤 Обработано: <b>{len(uids)}</b>\n"
+        f"✅ Обновлено: <b>{updated}</b>\n"
+        f"❌ Не удалось: <b>{failed}</b>\n\n"
+        f"<i>Теперь напиши /top — имена должны отобразиться.</i>"
+    )
+
 
 @router.message(F.text == "🏆 Топ")
 async def cmd_top_btn(message: Message):
