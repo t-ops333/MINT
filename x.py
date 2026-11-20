@@ -136,6 +136,9 @@ def init_db():
             cursor.execute("CREATE TABLE IF NOT EXISTS miners (user_id BIGINT, card_type TEXT, count INT, PRIMARY KEY (user_id, card_type))")
             cursor.execute("CREATE TABLE IF NOT EXISTS mining_stats (user_id BIGINT PRIMARY KEY, accumulated_btc NUMERIC DEFAULT 0, last_update TIMESTAMP)")
             cursor.execute("CREATE TABLE IF NOT EXISTS snos_log (user_id BIGINT PRIMARY KEY, previous_rank TEXT, previous_balance BIGINT, timestamp TEXT)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS rob_inventory (user_id BIGINT, item_type TEXT, count INT DEFAULT 0, PRIMARY KEY (user_id, item_type))")
+            cursor.execute("CREATE TABLE IF NOT EXISTS rob_cooldown (user_id BIGINT, target TEXT, last_time TIMESTAMP, PRIMARY KEY (user_id, target))")
+            cursor.execute("CREATE TABLE IF NOT EXISTS deposit_topups (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, date TEXT, timestamp TIMESTAMP)")
             conn.commit()
 
             cursor.execute("SELECT user_id FROM admins WHERE user_id = %s", (ADMIN_ID,))
@@ -436,65 +439,355 @@ def get_user_clan(user_id):
     return None
 
 
-# ---------- Кейсы ----------
-def get_case_price(case_type: str) -> int:
-    return {"деревянный": 10000000, "железный": 100000000, "золотой": 1000000000,
-            "алмазный": 10000000000, "легендарный": 100000000000,
-            "мифический": 1000000000000, "космический": 100000000000000}.get(case_type.lower(), 0)
+# ============================================================
+# 📦 КЕЙСЫ V2
+# ============================================================
+CASE_TYPES = {
+    "деревянный": {
+        "emoji": "📦", "price": 10_000_000,
+        "color": "🟫",
+        "drops": [
+            ("nothing", 0, 0.50),
+            ("money", 4_000_000, 0.25),
+            ("money", 12_000_000, 0.13),
+            ("money", 40_000_000, 0.055),
+            ("money", 100_000_000, 0.013),
+            ("money", 800_000_000, 0.002),
+        ]
+    },
+    "железный": {
+        "emoji": "🗃", "price": 100_000_000,
+        "color": "⬜",
+        "drops": [
+            ("nothing", 0, 0.50),
+            ("money", 25_000_000, 0.25),
+            ("money", 60_000_000, 0.13),
+            ("money", 150_000_000, 0.08),
+            ("money", 400_000_000, 0.035),
+            ("vip", 6, 0.005),
+        ]
+    },
+    "золотой": {
+        "emoji": "🎁", "price": 1_000_000_000,
+        "color": "🟨",
+        "drops": [
+            ("nothing", 0, 0.45),
+            ("money", 80_000_000, 0.25),
+            ("money", 250_000_000, 0.15),
+            ("money", 700_000_000, 0.10),
+            ("money", 1_800_000_000, 0.045),
+            ("vip", 24, 0.005),
+        ]
+    },
+    "алмазный": {
+        "emoji": "💎", "price": 10_000_000_000,
+        "color": "🔷",
+        "drops": [
+            ("nothing", 0, 0.40),
+            ("money", 400_000_000, 0.25),
+            ("money", 1_500_000_000, 0.18),
+            ("money", 4_000_000_000, 0.11),
+            ("money", 9_000_000_000, 0.055),
+            ("vip", 72, 0.005),
+        ]
+    },
+    "легендарный": {
+        "emoji": "🏆", "price": 100_000_000_000,
+        "color": "🟪",
+        "drops": [
+            ("nothing", 0, 0.35),
+            ("money", 1_500_000_000, 0.25),
+            ("money", 8_000_000_000, 0.20),
+            ("money", 40_000_000_000, 0.12),
+            ("money", 90_000_000_000, 0.075),
+            ("vip", 168, 0.005),
+        ]
+    },
+    "мифический": {
+        "emoji": "🔮", "price": 1_000_000_000_000,
+        "color": "🟥",
+        "drops": [
+            ("nothing", 0, 0.30),
+            ("money", 8_000_000_000, 0.25),
+            ("money", 80_000_000_000, 0.20),
+            ("money", 400_000_000_000, 0.12),
+            ("money", 900_000_000_000, 0.125),
+            ("vip", 336, 0.005),
+        ]
+    },
+    "космический": {
+        "emoji": "🌌", "price": 100_000_000_000_000,
+        "color": "🟦",
+        "drops": [
+            ("nothing", 0, 0.25),
+            ("money", 80_000_000_000, 0.25),
+            ("money", 800_000_000_000, 0.22),
+            ("money", 8_000_000_000_000, 0.13),
+            ("money", 80_000_000_000_000, 0.145),
+            ("vip", 720, 0.005),
+        ]
+    },
+}
 
 
-def get_case_reward(case_type: str):
+def roll_case(case_type: str):
+    """Возвращает (тип, значение) по шансам."""
+    data = CASE_TYPES.get(case_type)
+    if not data:
+        return ("nothing", 0)
     r = random.random()
-    if case_type == "деревянный":
-        if r < 0.55: return ("nothing", 0)
-        elif r < 0.80: return ("money", 4000000)
-        elif r < 0.93: return ("money", 12000000)
-        elif r < 0.985: return ("money", 40000000)
-        elif r < 0.998: return ("money", 100000000)
-        else: return ("money", 800000000)
-    elif case_type == "железный":
-        if r < 0.50: return ("nothing", 0)
-        elif r < 0.75: return ("money", 25000000)
-        elif r < 0.88: return ("money", 60000000)
-        elif r < 0.96: return ("money", 150000000)
-        elif r < 0.995: return ("money", 400000000)
-        else: return ("vip", 6)
-    elif case_type == "золотой":
-        if r < 0.45: return ("nothing", 0)
-        elif r < 0.70: return ("money", 80000000)
-        elif r < 0.85: return ("money", 250000000)
-        elif r < 0.95: return ("money", 700000000)
-        elif r < 0.995: return ("money", 1800000000)
-        else: return ("vip", 24)
-    elif case_type == "алмазный":
-        if r < 0.40: return ("nothing", 0)
-        elif r < 0.65: return ("money", 400000000)
-        elif r < 0.83: return ("money", 1500000000)
-        elif r < 0.94: return ("money", 4000000000)
-        elif r < 0.995: return ("money", 9000000000)
-        else: return ("vip", 72)
-    elif case_type == "легендарный":
-        if r < 0.35: return ("nothing", 0)
-        elif r < 0.60: return ("money", 1500000000)
-        elif r < 0.80: return ("money", 8000000000)
-        elif r < 0.92: return ("money", 40000000000)
-        elif r < 0.995: return ("money", 90000000000)
-        else: return ("vip", 168)
-    elif case_type == "мифический":
-        if r < 0.30: return ("nothing", 0)
-        elif r < 0.55: return ("money", 8000000000)
-        elif r < 0.75: return ("money", 80000000000)
-        elif r < 0.87: return ("money", 400000000000)
-        elif r < 0.995: return ("money", 900000000000)
-        else: return ("vip", 336)
-    elif case_type == "космический":
-        if r < 0.25: return ("nothing", 0)
-        elif r < 0.50: return ("money", 80000000000)
-        elif r < 0.72: return ("money", 800000000000)
-        elif r < 0.85: return ("money", 8000000000000)
-        elif r < 0.995: return ("money", 80000000000000)
-        else: return ("vip", 720)
-    return ("nothing", 0)
+    cumulative = 0.0
+    for dtype, dval, chance in data["drops"]:
+        cumulative += chance
+        if r < cumulative:
+            return (dtype, dval)
+    return data["drops"][-1][:2]
+
+
+def case_win_text(case_type: str, results: list) -> str:
+    """Форматирует текст результата открытия."""
+    emoji = CASE_TYPES[case_type]["emoji"]
+    total_money = 0
+    total_vip = 0
+    details = []
+
+    for dtype, dval in results:
+        if dtype == "money":
+            total_money += dval
+            details.append(f"💰 +{format_balance(dval)}")
+        elif dtype == "vip":
+            total_vip += dval
+            details.append(f"👑 VIP ×{dval}ч")
+        else:
+            details.append("❌ пусто")
+
+    summary = f"{emoji} <b>Открыто: {len(results)}× {case_type}</b>\n━━━━━━━━━━━━━━━━━━━\n"
+    for i, d in enumerate(details, 1):
+        summary += f"{i}. {d}\n"
+    summary += "━━━━━━━━━━━━━━━━━━━\n"
+    if total_money > 0:
+        summary += f"💰 Всего денег: <b>{format_balance(total_money)}</b>\n"
+    if total_vip > 0:
+        summary += f"👑 Всего VIP: <b>{total_vip} ч</b>\n"
+    return summary, total_money, total_vip
+
+
+def apply_case_rewards(uid: int, total_money: int, total_vip: int):
+    if total_money > 0:
+        update_balance(uid, total_money)
+    if total_vip > 0:
+        user = get_user(uid)
+        cu = user.get('vip_until')
+        new_until = (cu + timedelta(hours=total_vip)) if (cu and cu > datetime.now()) else (datetime.now() + timedelta(hours=total_vip))
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE users SET vip_until = %s WHERE user_id = %s", (new_until, uid))
+                conn.commit()
+
+
+def case_main_menu():
+    text = "📦 <b>КЕЙСЫ</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    for name, data in CASE_TYPES.items():
+        drops = data["drops"]
+        max_money = max((d[1] for d in drops if d[0] == "money"), default=0)
+        max_vip = max((d[1] for d in drops if d[0] == "vip"), default=0)
+        max_str = f"до {format_balance(max_money)}" if max_money > 0 else ""
+        if max_vip > 0:
+            max_str += f" | VIP ×{max_vip}ч"
+        text += f"{data['emoji']} <b>{name}</b> — {format_balance(data['price'])}\n"
+        text += f"   <i>{max_str}</i>\n\n"
+    text += "👇 <i>Нажми на кейс чтобы купить или открыть:</i>"
+    rows = []
+    for name, data in CASE_TYPES.items():
+        rows.append([InlineKeyboardButton(
+            text=f"{data['emoji']} {name} — {format_balance(data['price'])}",
+            callback_data=f"case:info:{name}"
+        )])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(F.text.lower().in_(["кейс", "кейсы", "case"]))
+async def case_main(message: Message):
+    text, kb = case_main_menu()
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(F.text == "👛 Сейф")
+async def cmd_safe_btn(message: Message):
+    await safe_cmd(message)
+
+
+@router.callback_query(F.data.startswith("case:info:"))
+async def case_info(cb: CallbackQuery):
+    name = cb.data.split(":")[2]
+    if name not in CASE_TYPES:
+        await cb.answer("Неизвестный кейс", show_alert=True)
+        return
+    data = CASE_TYPES[name]
+    uid = cb.from_user.id
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT count FROM cases_inventory WHERE user_id = %s AND case_type = %s", (uid, name))
+            row = cursor.fetchone()
+            have = row[0] if row else 0
+
+    text = f"{data['emoji']} <b>{name.upper()}</b>\n━━━━━━━━━━━━━━━━━━━\n"
+    text += f"💰 Цена: <b>{format_balance(data['price'])}</b>\n"
+    text += f"📦 У тебя: <b>{have}</b>\n\n"
+    text += "🎲 <b>Шансы выпадения:</b>\n"
+    for dtype, dval, chance in data["drops"]:
+        pct = chance * 100
+        if dtype == "money":
+            text += f"  💰 {format_balance(dval)} — <b>{pct:.1f}%</b>\n"
+        elif dtype == "vip":
+            text += f"  👑 VIP ×{dval}ч — <b>{pct:.1f}%</b>\n"
+        else:
+            text += f"  ❌ пусто — <b>{pct:.1f}%</b>\n"
+
+    rows = []
+    if have > 0:
+        rows.append([InlineKeyboardButton(text="📦 Открыть 1", callback_data=f"case:open1:{name}")])
+        if have >= 5:
+            rows.append([InlineKeyboardButton(text="📦×5 Открыть 5", callback_data=f"case:open5:{name}")])
+        if have >= 10:
+            rows.append([InlineKeyboardButton(text="📦×10 Открыть 10", callback_data=f"case:open10:{name}")])
+    rows.append([InlineKeyboardButton(text=f"🛒 Купить за {format_balance(data['price'])}", callback_data=f"case:buy:{name}")])
+    rows.append([InlineKeyboardButton(text="◀️ К кейсам", callback_data="case:main")])
+    await cb.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await cb.answer()
+
+
+@router.callback_query(F.data == "case:main")
+async def case_back(cb: CallbackQuery):
+    text, kb = case_main_menu()
+    await cb.message.edit_text(text, reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("case:buy:"))
+async def case_buy(cb: CallbackQuery):
+    name = cb.data.split(":")[2]
+    if name not in CASE_TYPES:
+        await cb.answer("Неизвестный кейс", show_alert=True)
+        return
+    price = CASE_TYPES[name]["price"]
+    user = get_user(cb.from_user.id)
+    if user["balance"] < price:
+        await cb.answer(f"❌ Нужно {format_balance(price)}\nУ тебя: {format_balance(user['balance'])}", show_alert=True)
+        return
+    update_balance(cb.from_user.id, -price)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO cases_inventory (user_id, case_type, count) VALUES (%s, %s, 1) "
+                "ON CONFLICT (user_id, case_type) DO UPDATE SET count = cases_inventory.count + 1",
+                (cb.from_user.id, name))
+            conn.commit()
+    await cb.answer(f"✅ Куплено: {CASE_TYPES[name]['emoji']} {name}", show_alert=True)
+    await case_info(cb)
+
+
+@router.callback_query(F.data.startswith("case:open"))
+async def case_open(cb: CallbackQuery):
+    parts = cb.data.split(":")
+    action = parts[1]  # open1/open5/open10
+    name = parts[2]
+    if name not in CASE_TYPES:
+        await cb.answer("Неизвестный кейс", show_alert=True)
+        return
+    count = {"open1": 1, "open5": 5, "open10": 10}.get(action, 1)
+    uid = cb.from_user.id
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT count FROM cases_inventory WHERE user_id = %s AND case_type = %s", (uid, name))
+            row = cursor.fetchone()
+            have = row[0] if row else 0
+            if have < count:
+                await cb.answer(f"❌ Нужно {count}, у тебя {have}", show_alert=True)
+                return
+            new_count = have - count
+            if new_count <= 0:
+                cursor.execute("DELETE FROM cases_inventory WHERE user_id = %s AND case_type = %s", (uid, name))
+            else:
+                cursor.execute("UPDATE cases_inventory SET count = %s WHERE user_id = %s AND case_type = %s", (new_count, uid, name))
+            conn.commit()
+
+    # Анимация
+    emoji = CASE_TYPES[name]["emoji"]
+    await cb.message.edit_text(
+        f"{emoji} <b>Открываем...</b>\n\n"
+        f"🎰 {'🎁 🎰 📦 💎 🏆 🔮 🌌'}\n\n"
+        f"<i>Удачной охоты!</i>",
+        reply_markup=None
+    )
+    await cb.answer()
+    await asyncio.sleep(1.5)
+
+    results = [roll_case(name) for _ in range(count)]
+    summary, total_money, total_vip = case_win_text(name, results)
+    apply_case_rewards(uid, total_money, total_vip)
+
+    await cb.message.edit_text(
+        summary,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📦 Ещё раз", callback_data=f"case:info:{name}")],
+            [InlineKeyboardButton(text="📦 Все кейсы", callback_data="case:main")]
+        ])
+    )
+
+
+# Старая команда через текст (совместимость)
+@router.message(F.text.lower().startswith(("кейс ", "case ")))
+async def case_cmd(message: Message):
+    args = message.text.split()
+    if len(args) < 3:
+        text, kb = case_main_menu()
+        await message.answer(text, reply_markup=kb)
+        return
+    sub = args[1].lower()
+    case_type = args[2].lower()
+    if case_type not in CASE_TYPES:
+        await message.answer("❌ Неизвестный тип. Доступно: " + ", ".join(CASE_TYPES.keys()))
+        return
+    if sub == "купить":
+        price = CASE_TYPES[case_type]["price"]
+        user = get_user(message.from_user.id)
+        if user["balance"] < price:
+            await message.answer(f"❌ Нужно {format_balance(price)}.")
+            return
+        update_balance(message.from_user.id, -price)
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO cases_inventory (user_id, case_type, count) VALUES (%s, %s, 1) "
+                    "ON CONFLICT (user_id, case_type) DO UPDATE SET count = cases_inventory.count + 1",
+                    (message.from_user.id, case_type))
+                conn.commit()
+        await message.answer(f"📦 Кейс '<b>{case_type}</b>' куплен!")
+    elif sub == "открыть":
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT count FROM cases_inventory WHERE user_id = %s AND case_type = %s",
+                               (message.from_user.id, case_type))
+                row = cursor.fetchone()
+                if not row or row[0] <= 0:
+                    await message.answer("❌ У тебя нет такого кейса.")
+                    return
+                if row[0] == 1:
+                    cursor.execute("DELETE FROM cases_inventory WHERE user_id = %s AND case_type = %s",
+                                   (message.from_user.id, case_type))
+                else:
+                    cursor.execute("UPDATE cases_inventory SET count = count - 1 WHERE user_id = %s AND case_type = %s",
+                                   (message.from_user.id, case_type))
+                conn.commit()
+        results = [roll_case(case_type)]
+        summary, total_money, total_vip = case_win_text(case_type, results)
+        apply_case_rewards(message.from_user.id, total_money, total_vip)
+        await message.answer(summary)
+    else:
+        await message.answer("Использование: <code>кейс купить/открыть [тип]</code>")
 
 
 # ---------- BTC / Майнинг ----------
@@ -685,7 +978,7 @@ async def cmd_start(message: Message):
         f"🎰 Игры: Рулетка, Джокер, Мины, Дуэли, Coinflip\n"
         f"💎 Валюта: {CURRENCY}\n"
         f"💰 Начальный баланс: 4 000 {CURRENCY}\n\n"
-        f"👨‍💻 Связь с разработчиком: @se7ze\n\n"
+        f"👨‍💻 Связь с разработчиком: @d0xse\n\n"
         f"Используй кнопки ниже для навигации."
     )
     await message.answer(welcome, reply_markup=get_main_menu(user_id))
@@ -732,7 +1025,7 @@ async def cmd_chat_btn(message: Message):
 
 @router.message(F.text == "🛒 Донат")
 async def cmd_donate(message: Message):
-    await message.answer("💝 Для поддержки проекта пиши @se7ze.")
+    await message.answer("💝 Для поддержки проекта пиши @d0xse.")
 
 
 @router.message(Command("help"))
@@ -980,48 +1273,100 @@ async def cmd_change_name(message: Message):
     await message.answer(f"✅ Ваш игровой ник: 🏷️ {new_nick}")
 
 
+# ============================================================
+# 👑 VIP V2
+# ============================================================
+VIP_PACKAGES = {
+    24:  {"price": 10_000_000,  "label": "24 часа",   "emoji": "🕐"},
+    72:  {"price": 25_000_000,  "label": "3 дня",     "emoji": "📅"},
+    168: {"price": 50_000_000,  "label": "7 дней",    "emoji": "📆"},
+    336: {"price": 90_000_000,  "label": "14 дней",   "emoji": "🗓"},
+    720: {"price": 150_000_000, "label": "30 дней",   "emoji": "📊"},
+}
+
+VIP_BENEFITS = [
+    ("🎁", "Бонус ×2", "Ежедневный бонус удваивается"),
+    ("⚡", "Приоритет в топе", "VIP-игроки показываются выше"),
+    ("💎", "VIP-бейдж", "Особый статус в профиле и чате"),
+    ("🎰", "Эксклюзивные кейсы", "Скоро: VIP-кейсы с лучшими шансами"),
+    ("🚀", "Без кулдаунов", "Скоро: мгновенное ограбление без ожидания"),
+]
+
+
+def vip_menu_text(uid) -> str:
+    user = get_user(uid)
+    is_vip_user = False
+    until_str = ""
+    hours_left = 0
+    if user.get('vip_until') and user['vip_until'] > datetime.now():
+        is_vip_user = True
+        until_str = user['vip_until'].strftime('%d.%m.%Y %H:%M')
+        hours_left = int((user['vip_until'] - datetime.now()).total_seconds() // 3600)
+
+    text = f"👑 <b>VIP-СТАТУС {BOT_NAME}</b>\n"
+    text += "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    if is_vip_user:
+        text += f"✅ <b>У тебя активен VIP!</b>\n"
+        text += f"📅 До: <b>{until_str}</b>\n"
+        text += f"⏱ Осталось: <b>{hours_left} ч</b>\n\n"
+    else:
+        text += "❌ <b>У тебя нет VIP</b>\n\n"
+
+    text += "🎁 <b>Что даёт VIP:</b>\n"
+    for emoji, name, desc in VIP_BENEFITS:
+        text += f"{emoji} <b>{name}</b> — {desc}\n"
+
+    text += "\n💰 <b>Пакеты:</b>"
+    return text
+
+
+def vip_menu_kb(uid):
+    user = get_user(uid)
+    is_vip_user = user.get('vip_until') and user['vip_until'] > datetime.now()
+    rows = []
+    for hours, pkg in VIP_PACKAGES.items():
+        rows.append([InlineKeyboardButton(
+            text=f"{pkg['emoji']} {pkg['label']} — {format_balance(pkg['price'])}",
+            callback_data=f"vip:buy:{hours}"
+        )])
+    if is_vip_user:
+        rows.append([InlineKeyboardButton(text="🔄 Мой VIP", callback_data="vip:status")])
+    rows.append([InlineKeyboardButton(text="📖 Подробнее", callback_data="vip:info")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def vip_info_text() -> str:
+    return (
+        "📖 <b>ЧТО ТАКОЕ VIP</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>1️⃣ Бонус ×2</b>\n"
+        "Ежедневный бонус удваивается:\n"
+        f"• Обычный: 3 000 COINS\n"
+        f"• VIP: 6 000 COINS\n"
+        f"📈 Экономия: 6 000+ COINS в день\n\n"
+
+        "<b>2️⃣ Вип-бейдж</b>\n"
+        "👑 Рядом с твоим именем в профиле\n"
+        "🏆 В топе игроков показываешься выше\n\n"
+
+        "<b>3️⃣ Скидки и бонусы</b>\n"
+        "Скоро: VIP-цены в магазинах\n"
+        "Скоро: эксклюзивные кейсы\n\n"
+
+        "<b>💡 Стоит ли брать?</b>\n"
+        "Если играешь каждый день → окупается за 3-5 дней\n"
+        "Если редко → лучше не бери\n\n"
+
+        "<b>⏰ Кулдаун бонуса:</b> 8 часов\n"
+        "VIP не убирает кулдаун, но удваивает награду"
+    )
+
+
 @router.message(Command("vip"))
 async def cmd_vip(message: Message):
-    user = get_user(message.from_user.id)
-    if is_vip(message.from_user.id):
-        until = user['vip_until'].strftime('%d.%m.%Y %H:%M')
-        await message.answer(f"👑 <b>VIP-статус</b>\n\n⚜️ Ты VIP\n📅 До {until}\n🎁 Бонус x2 действует")
-    else:
-        await message.answer(
-            f"👑 <b>VIP-статус</b>\n\nУ тебя нет VIP.\n\n"
-            f"<b>Купить:</b> <code>vip_buy [часы]</code>\n"
-            f"• 24 ч — {format_balance(10000000)}\n"
-            f"• 72 ч — {format_balance(25000000)}\n"
-            f"• 168 ч — {format_balance(50000000)}\n"
-            f"• 336 ч — {format_balance(90000000)}\n"
-            f"• 720 ч — {format_balance(150000000)}"
-        )
-
-
-@router.message(Command("vip_buy"))
-async def cmd_vip_buy(message: Message):
-    args = message.text.split()
-    if len(args) < 2 or not args[1].isdigit():
-        await message.answer("Использование: <code>/vip_buy [часы]</code>")
-        return
-    hours = int(args[1])
-    price = get_vip_price(hours)
-    if price == 0:
-        await message.answer("❌ Неверный срок.")
-        return
-    user = get_user(message.from_user.id)
-    if user['balance'] < price:
-        await message.answer("❌ Недостаточно средств.")
-        return
-    update_balance(message.from_user.id, -price)
-    current_until = user.get('vip_until')
-    new_until = (current_until + timedelta(hours=hours)) if (current_until and current_until > datetime.now()) \
-        else (datetime.now() + timedelta(hours=hours))
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("UPDATE users SET vip_until = %s WHERE user_id = %s", (new_until, message.from_user.id))
-            conn.commit()
-    await message.answer(f"✅ VIP активирован до {new_until.strftime('%d.%m.%Y %H:%M')}")
+    await message.answer(vip_menu_text(message.from_user.id),
+                          reply_markup=vip_menu_kb(message.from_user.id))
 
 
 @router.message(F.text.lower() == "vip")
@@ -1029,9 +1374,90 @@ async def cmd_vip_text(message: Message):
     await cmd_vip(message)
 
 
-@router.message(F.text.lower().startswith("vip_buy"))
-async def cmd_vip_buy_text(message: Message):
-    await cmd_vip_buy(message)
+@router.callback_query(F.data == "vip:status")
+async def vip_status(cb: CallbackQuery):
+    await cb.message.edit_text(vip_menu_text(cb.from_user.id),
+                                reply_markup=vip_menu_kb(cb.from_user.id))
+    await cb.answer()
+
+
+@router.callback_query(F.data == "vip:info")
+async def vip_info(cb: CallbackQuery):
+    await cb.message.edit_text(vip_info_text(), reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="vip:status")]
+    ]))
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("vip:buy:"))
+async def vip_buy_cb(cb: CallbackQuery):
+    try:
+        hours = int(cb.data.split(":")[2])
+    except:
+        await cb.answer("Ошибка", show_alert=True)
+        return
+    if hours not in VIP_PACKAGES:
+        await cb.answer("Неизвестный пакет", show_alert=True)
+        return
+    pkg = VIP_PACKAGES[hours]
+    price = pkg["price"]
+    user = get_user(cb.from_user.id)
+    if user["balance"] < price:
+        await cb.answer(
+            f"❌ Нужно {format_balance(price)}\nУ тебя: {format_balance(user['balance'])}",
+            show_alert=True
+        )
+        return
+
+    update_balance(cb.from_user.id, -price)
+    current_until = user.get('vip_until')
+    new_until = (current_until + timedelta(hours=hours)) if (current_until and current_until > datetime.now()) \
+        else (datetime.now() + timedelta(hours=hours))
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET vip_until = %s WHERE user_id = %s", (new_until, cb.from_user.id))
+            conn.commit()
+    log_admin_action(cb.from_user.id, f"vip_buy {hours}h -{price}")
+
+    await cb.answer(f"✅ VIP на {pkg['label']} активирован!", show_alert=True)
+    await cb.message.edit_text(
+        f"👑 <b>VIP АКТИВИРОВАН!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Пакет: <b>{pkg['label']}</b>\n"
+        f"💰 Оплачено: {format_balance(price)}\n"
+        f"⏰ Действует до: <b>{new_until.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
+        f"🎁 Теперь твой бонус удваивается!\n"
+        f"⚡ Не забудь забрать его завтра!",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎁 Забрать бонус", callback_data="get_bonus_lc")],
+            [InlineKeyboardButton(text="🔄 Мой VIP", callback_data="vip:status")]
+        ])
+    )
+
+
+# Старая команда /vip_buy для совместимости
+@router.message(Command("vip_buy"))
+async def cmd_vip_buy(message: Message):
+    args = message.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("Использование: <code>/vip_buy [часы]</code>\nДоступно: 24, 72, 168, 336, 720")
+        return
+    hours = int(args[1])
+    if hours not in VIP_PACKAGES:
+        await message.answer(f"❌ Неверный срок. Доступно: {', '.join(map(str, VIP_PACKAGES.keys()))}")
+        return
+    # Показываем меню с подтверждением
+    pkg = VIP_PACKAGES[hours]
+    await message.answer(
+        f"👑 <b>Покупка VIP</b>\n\n"
+        f"📅 {pkg['label']}\n"
+        f"💰 Цена: {format_balance(pkg['price'])}\n\n"
+        f"Подтвердить?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Купить", callback_data=f"vip:buy:{hours}")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="vip:status")]
+        ])
+    )
 
 # =============================================================
 # MINT Bot — Часть 2/4: Экономика
@@ -1731,56 +2157,223 @@ async def collect_mining(message: Message):
 
 
 # ============================================================
-# БАНК / ДЕПОЗИТ
+# 🏦 БАНК / ДЕПОЗИТ V2
 # ============================================================
-@router.message(F.text.lower() == "банк")
-async def bank_info(message: Message):
+DEPOSIT_MIN = 5000
+DEPOSIT_MAX_TOPUPS_PER_DAY = 10
+DEPOSIT_INTEREST_PER_HOUR = 0.0005
+
+
+def deposit_interest_v2(start_time: datetime, amount: int) -> int:
+    hours = max(0, (datetime.now() - start_time).total_seconds() // 3600)
+    return int(amount * (DEPOSIT_INTEREST_PER_HOUR * hours))
+
+
+def get_today_topups(user_id: int) -> int:
+    today = datetime.now().strftime("%Y-%m-%d")
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT amount, start_time FROM deposits WHERE user_id = %s", (message.from_user.id,))
+            cursor.execute("SELECT COUNT(*) FROM deposit_topups WHERE user_id = %s AND date = %s",
+                           (user_id, today))
+            return cursor.fetchone()[0]
+
+
+def get_deposit(user_id: int):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT amount, start_time FROM deposits WHERE user_id = %s", (user_id,))
             row = cursor.fetchone()
-    if not row:
-        await message.answer(
-            f"🏦 <b>Банк</b>\n\n"
-            f"У вас нет депозита.\n\n"
-            f"<code>депозит &lt;сумма&gt;</code> — открыть (мин {format_balance(5000000)})\n"
-            f"📈 0.05% в час"
+            if row:
+                return {"amount": row[0], "start_time": row[1]}
+    return None
+
+
+def bank_main_text(user_id: int) -> str:
+    dep = get_deposit(user_id)
+    user = get_user(user_id)
+    today_topups = get_today_topups(user_id)
+    topups_left = DEPOSIT_MAX_TOPUPS_PER_DAY - today_topups
+
+    text = f"🏦 <b>БАНК {BOT_NAME}</b>\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"💰 Баланс: <b>{format_balance(user['balance'])}</b>\n\n"
+
+    if not dep:
+        text += (
+            f"❌ <b>Депозит не открыт</b>\n\n"
+            f"📈 <b>Условия:</b>\n"
+            f"• Минимум: {format_balance(DEPOSIT_MIN)}\n"
+            f"• Процент: 0.05% в час (~1.2% в день)\n"
+            f"• Комиссия снятия: 2%\n\n"
+            f"<i>Открой депозит и получай пассивный доход!</i>"
+        )
+    else:
+        interest = deposit_interest_v2(dep["start_time"], dep["amount"])
+        total = dep["amount"] + interest
+        hours_elapsed = int((datetime.now() - dep["start_time"]).total_seconds() // 3600)
+        text += (
+            f"✅ <b>Депозит активен</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Вложено: <b>{format_balance(dep['amount'])}</b>\n"
+            f"📈 Начислено: <b>{format_balance(interest)}</b>\n"
+            f"💎 Итого: <b>{format_balance(total)}</b>\n"
+            f"⏱ В банке: <b>{hours_elapsed} ч</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 Пополнений сегодня: <b>{today_topups}/{DEPOSIT_MAX_TOPUPS_PER_DAY}</b>\n"
+            f"   Осталось: <b>{topups_left}</b>\n\n"
+            f"💸 При снятии комиссия 2% = {format_balance(int(total * 0.02))}"
+        )
+    return text
+
+
+def bank_main_kb(user_id: int):
+    dep = get_deposit(user_id)
+    rows = []
+    if not dep:
+        rows.append([InlineKeyboardButton(text="➕ Открыть депозит", callback_data="bank:open")])
+    else:
+        rows.append([InlineKeyboardButton(text="💰 Пополнить", callback_data="bank:topup")])
+        rows.append([InlineKeyboardButton(text="💸 Снять всё", callback_data="bank:withdraw")])
+    rows.append([InlineKeyboardButton(text="📖 Как работает", callback_data="bank:guide")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(F.text.lower() == "банк")
+async def bank_info(message: Message):
+    uid = message.from_user.id
+    await message.answer(bank_main_text(uid), reply_markup=bank_main_kb(uid))
+
+
+@router.callback_query(F.data == "bank:main")
+async def bank_main_cb(callback: CallbackQuery):
+    try:
+        await callback.message.edit_text(bank_main_text(callback.from_user.id),
+                                          reply_markup=bank_main_kb(callback.from_user.id))
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bank:guide")
+async def bank_guide(callback: CallbackQuery):
+    text = (
+        f"📖 <b>КАК РАБОТАЕТ БАНК</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>1️⃣ Открытие</b>\n"
+        f"• Минимум {format_balance(DEPOSIT_MIN)}\n"
+        f"• Создаётся один депозит\n\n"
+        f"<b>2️⃣ Проценты</b>\n"
+        f"• 0.05% в час (≈1.2% в день, ≈36% в месяц)\n"
+        f"• Начисляются автоматически\n\n"
+        f"<b>3️⃣ Пополнение</b>\n"
+        f"• До {DEPOSIT_MAX_TOPUPS_PER_DAY} раз в день\n"
+        f"• Любая сумма от {format_balance(DEPOSIT_MIN)}\n"
+        f"• Проценты на общую сумму\n\n"
+        f"<b>4️⃣ Снятие</b>\n"
+        f"• Доступно в любой момент\n"
+        f"• Комиссия 2% от суммы+процентов\n\n"
+        f"<b>5️⃣ После снятия</b>\n"
+        f"• Можно открыть новый депозит сразу же"
+    )
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="bank:main")]
+    ]))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bank:open")
+async def bank_open_start(callback: CallbackQuery):
+    admin_states[callback.from_user.id] = {"action": "bank_open_amount"}
+    await callback.message.edit_text(
+        f"➕ <b>Открытие депозита</b>\n\n"
+        f"Минимум: <b>{format_balance(DEPOSIT_MIN)}</b>\n\n"
+        f"Введи сумму в чат:\n"
+        f"<i>Для отмены: /cancel</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="bank:main")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bank:topup")
+async def bank_topup_start(callback: CallbackQuery):
+    uid = callback.from_user.id
+    today = get_today_topups(uid)
+    if today >= DEPOSIT_MAX_TOPUPS_PER_DAY:
+        await callback.answer(
+            f"❌ Лимит {DEPOSIT_MAX_TOPUPS_PER_DAY}/день исчерпан.\nПопробуй завтра.",
+            show_alert=True
         )
         return
-    amount, start_time = row
-    interest = deposit_interest(start_time, amount)
-    total = amount + interest
-    await message.answer(
-        f"🏦 <b>Ваш депозит</b>\n\n"
-        f"💰 Сумма: {format_balance(amount)}\n"
-        f"📈 Проценты: {format_balance(interest)}\n"
-        f"💎 Итого: {format_balance(total)}\n"
-        f"💸 Комиссия снятия: 2%\n\n"
-        f"<code>снять депозит</code> — закрыть"
+    admin_states[uid] = {"action": "bank_topup_amount"}
+    await callback.message.edit_text(
+        f"💰 <b>Пополнение депозита</b>\n\n"
+        f"Минимум: <b>{format_balance(DEPOSIT_MIN)}</b>\n"
+        f"📊 Осталось пополнений сегодня: <b>{DEPOSIT_MAX_TOPUPS_PER_DAY - today}</b>\n\n"
+        f"Введи сумму в чат:\n"
+        f"<i>Для отмены: /cancel</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="bank:main")]
+        ])
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bank:withdraw")
+async def bank_withdraw_cb(callback: CallbackQuery):
+    uid = callback.from_user.id
+    dep = get_deposit(uid)
+    if not dep:
+        await callback.answer("❌ Нет депозита", show_alert=True)
+        return
+    interest = deposit_interest_v2(dep["start_time"], dep["amount"])
+    total = dep["amount"] + interest
+    commission = int(total * 0.02)
+    to_balance = total - commission
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM deposits WHERE user_id = %s", (uid,))
+            cursor.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (to_balance, uid))
+            conn.commit()
+    await callback.message.edit_text(
+        f"✅ <b>Депозит закрыт</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Вложено: {format_balance(dep['amount'])}\n"
+        f"📈 Проценты: {format_balance(interest)}\n"
+        f"💵 Итого: {format_balance(total)}\n"
+        f"💸 Комиссия (2%): {format_balance(commission)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 Зачислено: <b>{format_balance(to_balance)}</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Открыть заново", callback_data="bank:open")],
+            [InlineKeyboardButton(text="🏦 В банк", callback_data="bank:main")]
+        ])
+    )
+    await callback.answer("✅ Деньги зачислены")
 
 
 @router.message(F.text.lower().startswith("депозит "))
-async def deposit_open(message: Message):
+async def deposit_open_text(message: Message):
     parts = message.text.split()
     if len(parts) < 2 or not parts[1].isdigit():
-        await message.answer(f"Использование: <code>депозит &lt;сумма&gt;</code> (мин {format_balance(5000000)})")
+        await message.answer(f"Использование: <code>депозит [сумма]</code> (мин {format_balance(DEPOSIT_MIN)})\nИли нажми <b>банк</b>")
         return
     amount = int(parts[1])
-    if amount < 5000000:
-        await message.answer(f"❌ Минимум {format_balance(5000000)}.")
+    if amount < DEPOSIT_MIN:
+        await message.answer(f"❌ Минимум {format_balance(DEPOSIT_MIN)}.")
         return
     user = get_user(message.from_user.id)
-    if user['balance'] < amount:
+    if user["balance"] < amount:
         await message.answer("❌ Недостаточно средств.")
         return
+    dep = get_deposit(message.from_user.id)
+    if dep:
+        await message.answer("❌ Депозит уже открыт. Используй <b>банк</b> для пополнения.")
+        return
+    update_balance(message.from_user.id, -amount)
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT 1 FROM deposits WHERE user_id = %s", (message.from_user.id,))
-            if cursor.fetchone():
-                await message.answer("❌ Депозит уже открыт. Сначала снимите.")
-                return
-            update_balance(message.from_user.id, -amount)
             cursor.execute("INSERT INTO deposits (user_id, amount, start_time) VALUES (%s, %s, %s)",
                            (message.from_user.id, amount, datetime.now()))
             conn.commit()
@@ -1788,48 +2381,317 @@ async def deposit_open(message: Message):
 
 
 @router.message(F.text.lower() == "снять депозит")
-async def deposit_withdraw(message: Message):
+async def deposit_withdraw_text(message: Message):
+    uid = message.from_user.id
+    dep = get_deposit(uid)
+    if not dep:
+        await message.answer("❌ Нет депозита.")
+        return
+    interest = deposit_interest_v2(dep["start_time"], dep["amount"])
+    total = dep["amount"] + interest
+    commission = int(total * 0.02)
+    to_balance = total - commission
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT amount, start_time FROM deposits WHERE user_id = %s", (message.from_user.id,))
-            row = cursor.fetchone()
-            if not row:
-                await message.answer("❌ У вас нет открытого депозита.")
-                return
-            amount, start_time = row
-            interest = deposit_interest(start_time, amount)
-            total = amount + interest
-            commission = int(total * 0.02)
-            to_bal = total - commission
-            cursor.execute("DELETE FROM deposits WHERE user_id = %s", (message.from_user.id,))
-            cursor.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (to_bal, message.from_user.id))
+            cursor.execute("DELETE FROM deposits WHERE user_id = %s", (uid,))
+            cursor.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", (to_balance, uid))
             conn.commit()
     await message.answer(
-        f"✅ Депозит закрыт.\n\n"
-        f"💰 Сумма: {format_balance(amount)}\n"
-        f"📈 Проценты: {format_balance(interest)}\n"
-        f"💸 Комиссия (2%): {format_balance(commission)}\n"
-        f"💎 Зачислено: <b>{format_balance(to_bal)}</b>"
+        f"✅ Депозит закрыт.\n"
+        f"💰 Зачислено: <b>{format_balance(to_balance)}</b>\n"
+        f"💸 Комиссия: {format_balance(commission)}"
     )
 
+# ============================================================
+# 🏴‍☠️ ОГРАБЛЕНИЕ V2
+# ============================================================
 
-# ============================================================
-# ОГРАБЛЕНИЕ
-# ============================================================
+ROB_TOOLS = {
+    "mask":   {"name": "Маска",       "emoji": "🎭", "price": 250_000,  "bonus": 3,  "wear": 0.6, "desc": "Скрывает лицо"},
+    "bag":    {"name": "Сумка",       "emoji": "💼", "price": 500_000,  "bonus": 5,  "wear": 0.6, "desc": "Больше денег"},
+    "suit":   {"name": "Спец одежда", "emoji": "🥷", "price": 1_000_000, "bonus": 7,  "wear": 0.5, "desc": "Свобода движений"},
+    "car":    {"name": "Машина",      "emoji": "🚗", "price": 2_000_000, "bonus": 10, "wear": 0.3, "desc": "Быстрый побег"},
+    "weapon": {"name": "Оружие",      "emoji": "🔫", "price": 4_000_000, "bonus": 15, "wear": 0.3, "desc": "Отпугивает охрану"},
+}
+
+ROB_TARGETS = {
+    "atm":    {"emoji": "🏧", "name": "Банкомат", "base": 60, "guard": 10,
+               "min": 3_000_000, "max": 8_000_000, "cooldown": 30, "cap": 90},
+    "casino": {"emoji": "🎰", "name": "Казино",   "base": 45, "guard": 40,
+               "min": 5_000_000, "max": 15_000_000, "cooldown": 60, "cap": 85},
+    "bank":   {"emoji": "🏦", "name": "Банк",     "base": 30, "guard": 70,
+               "min": 15_000_000, "max": 50_000_000, "cooldown": 120, "cap": 80},
+}
+
+
+def rob_get_inventory(user_id: int) -> dict:
+    inv = {}
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT item_type, count FROM rob_inventory WHERE user_id = %s AND count > 0", (user_id,))
+            for item, cnt in cursor.fetchall():
+                inv[item] = cnt
+    return inv
+
+
+def rob_add_item(user_id: int, item: str, count: int = 1):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO rob_inventory (user_id, item_type, count) VALUES (%s, %s, %s) "
+                "ON CONFLICT (user_id, item_type) DO UPDATE SET count = rob_inventory.count + EXCLUDED.count",
+                (user_id, item, count))
+            conn.commit()
+
+
+def rob_remove_item(user_id: int, item: str, count: int = 1):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE rob_inventory SET count = GREATEST(count - %s, 0) WHERE user_id = %s AND item_type = %s",
+                (count, user_id, item))
+            conn.commit()
+
+
+def rob_get_cooldown(user_id: int, target: str) -> int:
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT last_time FROM rob_cooldown WHERE user_id = %s AND target = %s", (user_id, target))
+            row = cursor.fetchone()
+    if not row or not row[0]:
+        return 0
+    cooldown = ROB_TARGETS[target]["cooldown"] * 60
+    elapsed = (datetime.now() - row[0]).total_seconds()
+    return max(0, int(cooldown - elapsed))
+
+
+def rob_set_cooldown(user_id: int, target: str):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO rob_cooldown (user_id, target, last_time) VALUES (%s, %s, %s) "
+                "ON CONFLICT (user_id, target) DO UPDATE SET last_time = EXCLUDED.last_time",
+                (user_id, target, datetime.now()))
+            conn.commit()
+
+
+def rob_calc_chance(user_id: int, target: str):
+    t = ROB_TARGETS[target]
+    inv = rob_get_inventory(user_id)
+    bonus = 0
+    used = []
+    for item_key, item_data in ROB_TOOLS.items():
+        if inv.get(item_key, 0) > 0:
+            bonus += item_data["bonus"]
+            used.append(item_key)
+    chance = min(t["base"] + bonus, t["cap"])
+    return chance, used
+
+
+def rob_main_menu_text(user_id: int):
+    inv = rob_get_inventory(user_id)
+    balance = get_user(user_id)["balance"]
+    text = f"🏴‍☠️ <b>ОГРАБЛЕНИЯ</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"💰 Баланс: <b>{format_balance(balance)}</b>\n\n"
+    text += "🎒 <b>Инструменты:</b>\n"
+    if inv:
+        for item_key, cnt in inv.items():
+            if item_key in ROB_TOOLS:
+                d = ROB_TOOLS[item_key]
+                text += f"  {d['emoji']} {d['name']} ×{cnt}\n"
+    else:
+        text += "  <i>нет</i>\n"
+    text += "\n🎯 <b>Цели:</b>\n"
+    for key, t in ROB_TARGETS.items():
+        cd = rob_get_cooldown(user_id, key)
+        chance, _ = rob_calc_chance(user_id, key)
+        if cd > 0:
+            m, s = cd // 60, cd % 60
+            status = f"⏳ {m}м {s}с" if m else f"⏳ {s}с"
+        else:
+            status = "✅ Готово"
+        text += f"  {t['emoji']} <b>{t['name']}</b> — {status}\n"
+        text += f"     💰 {format_balance(t['min'])}–{format_balance(t['max'])} | 🎲 {chance}% | 🛡 {t['guard']}%\n"
+    text += "\n<i>👇 Выбери цель:</i>"
+    return text
+
+
+def rob_main_menu_kb(user_id: int):
+    rows = []
+    for key, t in ROB_TARGETS.items():
+        cd = rob_get_cooldown(user_id, key)
+        label = f"{t['emoji']} {t['name']}"
+        if cd > 0:
+            label += " ⏳"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"rob:do:{key}")])
+    rows.append([InlineKeyboardButton(text="🎒 Инвентарь", callback_data="rob:inventory"),
+                 InlineKeyboardButton(text="🛒 Магазин", callback_data="rob:shop")])
+    rows.append([InlineKeyboardButton(text="📖 Гайд", callback_data="rob:guide")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(F.text.lower() == "ограбить")
 async def rob_cmd(message: Message):
     if not check_group_only(message, "ограбление"):
         return
-    result = perform_rob(message.from_user.id)
-    if not result["success"]:
-        if result.get("reason") == "need_balance":
-            await message.answer(f"❌ Нужно минимум {format_balance(500000)} для ограбления.")
-        elif result.get("reason") == "cooldown":
-            await message.answer("❌ Ограбление раз в 15 минут.")
-        else:
-            await message.answer(f"❌ Неудача. Штраф: {format_balance(result.get('penalty', 0))}")
+    uid = message.from_user.id
+    await message.answer(rob_main_menu_text(uid), reply_markup=rob_main_menu_kb(uid))
+
+
+@router.callback_query(F.data == "rob:main")
+async def rob_main_cb(callback: CallbackQuery):
+    uid = callback.from_user.id
+    try:
+        await callback.message.edit_text(rob_main_menu_text(uid), reply_markup=rob_main_menu_kb(uid))
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data == "rob:guide")
+async def rob_guide(callback: CallbackQuery):
+    text = (
+        "📖 <b>КАК ОГРАБЛЯТЬ</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>1️⃣ Купи инструменты</b>\n"
+        "🎭 Маска +3% | 💼 Сумка +5% | 🥷 Костюм +7%\n"
+        "🚗 Машина +10% | 🔫 Оружие +15%\n\n"
+        "<b>2️⃣ Выбери цель</b>\n"
+        "🏧 Банкомат — безопасно\n"
+        "🎰 Казино — средне\n"
+        "🏦 Банк — опасно, но джекпот\n\n"
+        "<b>3️⃣ Охрана</b>\n"
+        "🛡 Если сработает — шанс −25% (с 🔫 только −10%)\n\n"
+        "<b>4️⃣ Провал</b>\n"
+        "💸 Штраф 20-30% | 🎒 Могут отобрать инструмент"
+    )
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="rob:main")]
+    ]))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "rob:inventory")
+async def rob_inventory(callback: CallbackQuery):
+    uid = callback.from_user.id
+    inv = rob_get_inventory(uid)
+    if not inv:
+        text = "🎒 <b>Инвентарь пуст</b>\n\nКупи в магазине!"
     else:
-        await message.answer(f"🎉 Ограбление успешно! Украл {format_balance(result['win_amount'])}.")
+        text = "🎒 <b>Твой инвентарь</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        for item_key, cnt in inv.items():
+            if item_key in ROB_TOOLS:
+                d = ROB_TOOLS[item_key]
+                text += f"{d['emoji']} <b>{d['name']}</b> ×{cnt} (+{d['bonus']}%)\n"
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Магазин", callback_data="rob:shop")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="rob:main")]
+    ]))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "rob:shop")
+async def rob_shop(callback: CallbackQuery):
+    text = "🛒 <b>МАГАЗИН</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    for key, d in ROB_TOOLS.items():
+        text += f"{d['emoji']} <b>{d['name']}</b> — {format_balance(d['price'])}\n   +{d['bonus']}% | износ {int(d['wear']*100)}%\n\n"
+    rows = []
+    for key, d in ROB_TOOLS.items():
+        rows.append([InlineKeyboardButton(
+            text=f"{d['emoji']} {d['name']} — {format_balance(d['price'])}",
+            callback_data=f"rob:buy:{key}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="rob:main")])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("rob:buy:"))
+async def rob_buy(callback: CallbackQuery):
+    uid = callback.from_user.id
+    item_key = callback.data.split(":")[2]
+    if item_key not in ROB_TOOLS:
+        await callback.answer("Неизвестно", show_alert=True)
+        return
+    d = ROB_TOOLS[item_key]
+    user = get_user(uid)
+    if user["balance"] < d["price"]:
+        await callback.answer(f"❌ Нужно {format_balance(d['price'])}", show_alert=True)
+        return
+    update_balance(uid, -d["price"])
+    rob_add_item(uid, item_key, 1)
+    await callback.answer(f"✅ Куплено: {d['name']}", show_alert=True)
+    await rob_shop(callback)
+
+
+@router.callback_query(F.data.startswith("rob:do:"))
+async def rob_do(callback: CallbackQuery):
+    uid = callback.from_user.id
+    target = callback.data.split(":")[2]
+    if target not in ROB_TARGETS:
+        await callback.answer("Неизвестно", show_alert=True)
+        return
+    cd = rob_get_cooldown(uid, target)
+    if cd > 0:
+        m, s = cd // 60, cd % 60
+        await callback.answer(f"⏳ Кулдаун: {m}м {s}с", show_alert=True)
+        return
+    user = get_user(uid)
+    if user["balance"] < 500_000:
+        await callback.answer(f"❌ Нужно минимум {format_balance(500_000)}", show_alert=True)
+        return
+    t = ROB_TARGETS[target]
+    chance, used_tools = rob_calc_chance(uid, target)
+    has_guard = random.random() * 100 < t["guard"]
+    guard_penalty = 0
+    if has_guard:
+        has_weapon = "weapon" in used_tools
+        guard_penalty = 10 if has_weapon else 25
+        chance = max(5, chance - guard_penalty)
+    success = random.random() * 100 < chance
+    tools_str = " ".join(ROB_TOOLS[t_]["emoji"] for t_ in used_tools) if used_tools else "❌ без инструментов"
+    await callback.message.edit_text(
+        f"🎬 <b>Ограбление {t['name'].lower()}...</b>\n\n"
+        f"🎒 {tools_str}\n🎲 Шанс: {chance}%\n"
+        + (f"🛡 <b>ОХРАНА!</b> Шанс −{guard_penalty}%\n" if has_guard else "")
+        + "\n<i>Проникаем...</i>",
+        reply_markup=None)
+    await callback.answer()
+    await asyncio.sleep(2.5)
+    worn_items = []
+    for t_key in used_tools:
+        if random.random() < ROB_TOOLS[t_key]["wear"]:
+            rob_remove_item(uid, t_key, 1)
+            worn_items.append(t_key)
+    rob_set_cooldown(uid, target)
+    if success:
+        win_amount = random.randint(t["min"], t["max"])
+        update_balance(uid, win_amount)
+        log_admin_action(uid, f"rob_success {target} {win_amount}")
+        result_text = (
+            f"🎉🎉🎉 <b>УСПЕХ!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{t['emoji']} <b>{t['name']}</b> ограблен!\n\n"
+            f"💰 Добыча: <b>{format_balance(win_amount)}</b>\n🎲 Шанс был: {chance}%\n"
+        )
+        if worn_items:
+            result_text += f"\n🔧 Износились: " + ", ".join(f"{ROB_TOOLS[k]['emoji']}" for k in worn_items)
+    else:
+        penalty_pct = 0.30 if has_guard else 0.20
+        penalty = min(int(t["max"] * penalty_pct), user["balance"])
+        update_balance(uid, -penalty)
+        stolen = None
+        if has_guard and used_tools:
+            stolen = random.choice(used_tools)
+            rob_remove_item(uid, stolen, 1)
+        log_admin_action(uid, f"rob_fail {target} -{penalty}")
+        result_text = f"🚨 <b>ПРОВАЛ!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n{t['emoji']} <b>{t['name']}</b> — не вышло!\n\n"
+        if has_guard:
+            result_text += "🛡 <b>Охрана поймала!</b>\n"
+        result_text += f"💸 Штраф: <b>{format_balance(penalty)}</b>\n"
+        if stolen:
+            result_text += f"🎒 Отобрали: {ROB_TOOLS[stolen]['emoji']} {ROB_TOOLS[stolen]['name']}\n"
+    await callback.message.edit_text(result_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Ещё раз", callback_data="rob:main")],
+        [InlineKeyboardButton(text="🛒 Магазин", callback_data="rob:shop")]
+    ]))
 
 # =============================================================
 # MINT Bot — Часть 3/4: Игры
@@ -2945,6 +3807,21 @@ async def cmd_admh_dot(message: Message):
 # ============================================================
 # 🛡 АДМИН-ПАНЕЛЬ
 # ============================================================
+
+def _check_admin(event) -> bool:
+    """Проверка прав администратора для callback/message event."""
+    if hasattr(event, "from_user") and event.from_user:
+        return is_admin(event.from_user.id)
+    return False
+
+
+def _back_kb(extra_rows=None, back_to="adm:main"):
+    """Кнопка 'Назад' + опциональные дополнительные ряды."""
+    rows = list(extra_rows) if extra_rows else []
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_to)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _admin_main_text(uid):
     with get_db() as conn:
         with conn.cursor() as cursor:
@@ -3042,19 +3919,25 @@ async def adm_main(callback: CallbackQuery):
     try:
         await callback.message.edit_text(_admin_main_text(callback.from_user.id),
                                           reply_markup=_admin_main_kb(callback.from_user.id))
-    except:
-        await callback.message.answer(_admin_main_text(callback.from_user.id),
-                                       reply_markup=_admin_main_kb(callback.from_user.id))
+    except Exception:
+        try:
+            await callback.message.answer(_admin_main_text(callback.from_user.id),
+                                           reply_markup=_admin_main_kb(callback.from_user.id))
+        except Exception as e:
+            logging.error(f"adm_main error: {e}")
     await callback.answer()
 
 
 @router.callback_query(F.data == "adm:help")
 async def adm_help(callback: CallbackQuery):
     if not _check_admin(callback):
+        await callback.answer("Нет доступа", show_alert=True)
         return
-    await callback.message.edit_text(ADMIN_HELP_TEXT, reply_markup=_back_kb())
+    try:
+        await callback.message.edit_text(ADMIN_HELP_TEXT, reply_markup=_back_kb())
+    except Exception:
+        await callback.message.answer(ADMIN_HELP_TEXT, reply_markup=_back_kb())
     await callback.answer()
-
 
 # ---------- 👥 ПОЛЬЗОВАТЕЛИ ----------
 @router.callback_query(F.data == "adm:users")
@@ -4230,6 +5113,69 @@ async def admin_state_handler(message: Message):
                 )
             except Exception as e:
                 await message.answer(f"❌ Ошибка отправки: {e}\n\nПроверь, что бот админ канала.")
+        elif action == "bank_open_amount":
+            try:
+                amount = int(text.replace(" ", "").replace("_", ""))
+            except:
+                await message.answer("❌ Введи число.")
+                return
+            if amount < DEPOSIT_MIN:
+                await message.answer(f"❌ Минимум {format_balance(DEPOSIT_MIN)}.")
+                return
+            user = get_user(uid)
+            if user["balance"] < amount:
+                await message.answer(f"❌ Недостаточно. У тебя: {format_balance(user['balance'])}")
+                return
+            dep = get_deposit(uid)
+            if dep:
+                admin_states.pop(uid, None)
+                await message.answer("❌ Депозит уже открыт.")
+                return
+            update_balance(uid, -amount)
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("INSERT INTO deposits (user_id, amount, start_time) VALUES (%s, %s, %s)",
+                                   (uid, amount, datetime.now()))
+                    conn.commit()
+            admin_states.pop(uid, None)
+            await message.answer(f"✅ Депозит открыт на <b>{format_balance(amount)}</b>!\n📈 0.05% в час.")
+
+        elif action == "bank_topup_amount":
+            try:
+                amount = int(text.replace(" ", "").replace("_", ""))
+            except:
+                await message.answer("❌ Введи число.")
+                return
+            if amount < DEPOSIT_MIN:
+                await message.answer(f"❌ Минимум {format_balance(DEPOSIT_MIN)}.")
+                return
+            dep = get_deposit(uid)
+            if not dep:
+                admin_states.pop(uid, None)
+                await message.answer("❌ Депозита нет. Сначала открой.")
+                return
+            today = get_today_topups(uid)
+            if today >= DEPOSIT_MAX_TOPUPS_PER_DAY:
+                admin_states.pop(uid, None)
+                await message.answer(f"❌ Лимит {DEPOSIT_MAX_TOPUPS_PER_DAY}/день.")
+                return
+            user = get_user(uid)
+            if user["balance"] < amount:
+                await message.answer(f"❌ Недостаточно. У тебя: {format_balance(user['balance'])}")
+                return
+            update_balance(uid, -amount)
+            with get_db() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("UPDATE deposits SET amount = amount + %s WHERE user_id = %s", (amount, uid))
+                    cursor.execute("INSERT INTO deposit_topups (user_id, amount, date, timestamp) VALUES (%s, %s, %s, %s)",
+                                   (uid, amount, datetime.now().strftime("%Y-%m-%d"), datetime.now()))
+                    conn.commit()
+            admin_states.pop(uid, None)
+            today_after = today + 1
+            await message.answer(
+                f"✅ Пополнено на <b>{format_balance(amount)}</b>\n"
+                f"📊 Осталось пополнений: {DEPOSIT_MAX_TOPUPS_PER_DAY - today_after}/{DEPOSIT_MAX_TOPUPS_PER_DAY}"
+            )
 
         elif action == "massgift_btc":
             try:
