@@ -477,11 +477,7 @@ def get_user_link(user_id: int, first_name=None, username=None,
     return link
 
 def clean_first_name(first_name: str, user_id: int) -> str:
-    return get_display_name(user_id, first_name)    invisible = {"ㅤ", "ᅠ"}
-    for ch in first_name:
-        if ch.strip() and ch not in invisible:
-            return first_name
-    return f"Пользователь - {user_id}"
+    return get_display_name(user_id, first_name)
 
 
 # ---------- VIP ----------
@@ -1332,10 +1328,10 @@ async def cmd_transfer(message: Message):
     if not target:
         await message.answer("❌ Получатель не найден.")
         return
-    if target['user_id'] == message.from_user.id:
+        if target['user_id'] == message.from_user.id:
         await message.answer("❌ Нельзя перевести самому себе.")
         return
-        update_balance(user['user_id'], -amount)
+    update_balance(user['user_id'], -amount)
     update_balance(target['user_id'], amount)
     log_transfer(user['user_id'], target['user_id'], amount, comment)
     msg = f"💸 {get_user_link(user['user_id'], user['first_name'], user.get('username'), user.get('custom_nick'))} перевел {get_user_link(target['user_id'], target['first_name'], target.get('username'), target.get('custom_nick'))} <b>{format_balance(amount)}</b>."
