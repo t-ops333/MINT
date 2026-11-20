@@ -3932,11 +3932,13 @@ ADMIN_HELP_TEXT = (
     "• <code>/admin</code> — инлайн-панель\n"
     "• <code>/info @user</code> — инфо о юзере\n"
     "• <code>/stats</code> — статистика бота\n"
-    "• <code>/setbal @user сумма</code> — установить баланс\n"
-    "• <code>/take @user сумма</code> — списать\n"
-    "• <code>/resetbal @user</code> — сброс до 4000\n"
     "• <code>/history @user</code> — история игр\n"
     "• <code>/admh</code> или <code>.admh</code> — эта справка\n\n"
+
+    "✨ <b>SPADMIN+ (спец. админ и выше):</b>\n"
+    "• <code>/setbal @user сумма</code> — установить баланс\n"
+    "• <code>/take @user сумма</code> — списать средства\n"
+    "• <code>/resetbal @user</code> — сброс баланса до 4000\n\n"
 
     "🔰 <b>ADMIN+ (администратор и выше):</b>\n"
     "• <code>/addpromo код сумма uses</code> — создать промо\n"
@@ -3945,7 +3947,7 @@ ADMIN_HELP_TEXT = (
     "• <code>/unadmin @user</code> — снять ранг\n\n"
 
     "👑 <b>HEAD+ (гл. админ и выше):</b>\n"
-    "• <code>/add_admin @user ранг</code> — назначить (moder/admin/head)\n"
+    "• <code>/add_admin @user ранг</code> — назначить (moder/spadmin/admin/head)\n"
     "• <code>/remove_admin @user</code> — снять\n"
     "• <code>/broadcast текст</code> — рассылка\n"
     "• <code>/setbonus сумма</code> — размер бонуса\n"
@@ -3960,8 +3962,8 @@ ADMIN_HELP_TEXT = (
     "• <code>/checkpoint @user</code> — сохранить баланс\n"
     "• <code>/restore_checkpoint @user</code> — восстановить\n\n"
 
-    "📌 <b>Ранги:</b>\n"
-    "💎 owner → 👑 head → 🔰 admin → ⭐ moder"
+    "📌 <b>Иерархия рангов:</b>\n"
+    "💎 owner → 👑 head → 🔰 admin → ✨ spadmin → ⭐ moder"
 )
 
 
