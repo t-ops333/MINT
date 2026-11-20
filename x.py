@@ -6939,19 +6939,23 @@ async def adm_broadcast_start(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:give_item")
 async def adm_give_item_start(cb: CallbackQuery):
-    if not is_spadmin_or_above(cb.from_user.id):
-        return await cb.answer("❌ Доступно только SPADMIN+", show_alert=True)
-    admin_states[cb.from_user.id] = {"action": "adm_give_item_target"}
-    await cb.message.edit_text(
-        "📦 <b>ВЫДАТЬ ПРЕДМЕТ</b>\n\n"
-        "Отправь ID или @username игрока:\n"
-        "<i>Для отмены: /cancel</i>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")]
-        ])
-    )
-    await cb.answer()
+    await cb.answer()  # ⚡ СНАЧАЛА стопаем спиннер, потом уже работаем
 
+    if not is_spadmin_or_above(cb.from_user.id):
+        return
+
+    admin_states[cb.from_user.id] = {"action": "adm_give_item_target"}
+    try:
+        await cb.message.edit_text(
+            "📦 <b>ВЫДАТЬ ПРЕДМЕТ</b>\n\n"
+            "Отправь ID или @username игрока:\n"
+            "<i>Для отмены: /cancel</i>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="adm:main")]
+            ])
+        )
+    except Exception as e:
+        logging.error(f"adm_give_item_start error: {e}")
 
 @router.callback_query(F.data.startswith("give:"))
 async def adm_give_item_process(cb: CallbackQuery):
