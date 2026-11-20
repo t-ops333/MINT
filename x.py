@@ -1325,7 +1325,7 @@ async def cmd_transfer(message: Message):
         target = find_user_by_identifier(parts[2])
         if len(parts) > 3:
             comment = " ".join(parts[3:])
-        if not target:
+    if not target:
         await message.answer("❌ Получатель не найден.")
         return
     if target['user_id'] == message.from_user.id:
