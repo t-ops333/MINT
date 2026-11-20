@@ -7724,22 +7724,37 @@ async def admin_state_handler(message: Message):
 
 
 # ============================================================
-# 🌐 ВЕБ-СЕРВЕР ДЛЯ RENDER
+# 🌐 ВЕБ-СЕРВЕР ДЛЯ RENDER (обязательно для Web Service)
 # ============================================================
+from aiohttp import web
+
 async def handle_ping(request):
     return web.Response(text="MINT bot is running!")
 
-
-async def web_server():
+async def main():
+    # 1. Запускаем веб-сервер, чтобы Render видел открытый порт
     app = web.Application()
     app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
+    
+    # Render передает порт через переменную PORT
     port = int(os.getenv("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info(f"Web server started on port {port}")
+    print(f"Веб-сервер запущен на порту {port}")
 
+    # 2. Запускаем самого бота
+    dp.include_router(router)
+    await bot.delete_webhook(drop_pending_updates=True)
+    print("Бот запущен!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Бот остановлен.")
 
 # ============================================================
 # 🔧 MIDDLEWARE + ЗАПУСК
