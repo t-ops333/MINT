@@ -2416,11 +2416,11 @@ ROB_TOOLS = {
 
 ROB_TARGETS = {
     "atm":    {"emoji": "🏧", "name": "Банкомат", "base": 60, "guard": 10,
-               "min": 3_000_000, "max": 8_000_000, "cooldown": 30, "cap": 90},
+               "min": 300_000, "max": 500_000, "cooldown": 30, "cap": 90},
     "casino": {"emoji": "🎰", "name": "Казино",   "base": 45, "guard": 40,
-               "min": 5_000_000, "max": 15_000_000, "cooldown": 60, "cap": 85},
+               "min": 500_000, "max": 1_500_000, "cooldown": 60, "cap": 85},
     "bank":   {"emoji": "🏦", "name": "Банк",     "base": 30, "guard": 70,
-               "min": 15_000_000, "max": 50_000_000, "cooldown": 120, "cap": 80},
+               "min": 1_500_000, "max": 2_000_000, "cooldown": 120, "cap": 80},
 }
 
 
