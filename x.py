@@ -139,6 +139,14 @@ def init_db():
             cursor.execute("CREATE TABLE IF NOT EXISTS rob_inventory (user_id BIGINT, item_type TEXT, count INT DEFAULT 0, PRIMARY KEY (user_id, item_type))")
             cursor.execute("CREATE TABLE IF NOT EXISTS rob_cooldown (user_id BIGINT, target TEXT, last_time TIMESTAMP, PRIMARY KEY (user_id, target))")
             cursor.execute("CREATE TABLE IF NOT EXISTS deposit_topups (id SERIAL PRIMARY KEY, user_id BIGINT, amount BIGINT, date TEXT, timestamp TIMESTAMP)")
+            cursor.execute("""CREATE TABLE IF NOT EXISTS transfers_log (
+                id SERIAL PRIMARY KEY,
+                sender_id BIGINT,
+                receiver_id BIGINT,
+                amount BIGINT,
+                comment TEXT,
+                timestamp TEXT
+            )""")
             conn.commit()
 
             cursor.execute("SELECT user_id FROM admins WHERE user_id = %s", (ADMIN_ID,))
@@ -162,30 +170,49 @@ init_db()
 # ХЕЛПЕРЫ
 # ============================================================
 def get_user(user_id: int, first_name: str = "", last_name: str = "", username: str = "") -> dict:
-    safe_name = first_name if first_name else "Игрок"
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT user_id, first_name, last_name, username, balance, last_bonus, games_played, games_won, referrer_id, referred_count, referal_bonus_claimed, last_daily, custom_nick, last_robbery, is_banned, ban_until, vip_until, btc, clan_id FROM users WHERE user_id = %s",
+                "SELECT user_id, first_name, last_name, username, balance, last_bonus, games_played, games_won, "
+                "referrer_id, referred_count, referal_bonus_claimed, last_daily, custom_nick, last_robbery, "
+                "is_banned, ban_until, vip_until, btc, clan_id FROM users WHERE user_id = %s",
                 (user_id,))
             row = cursor.fetchone()
             if not row:
                 cursor.execute(
-                    "INSERT INTO users (user_id, first_name, last_name, username, balance, last_bonus, games_played, games_won, referal_bonus_claimed) VALUES (%s,%s,%s,%s,%s,%s,0,0,0)",
-                    (user_id, safe_name, last_name or "", username or "", 4000, None))
+                    "INSERT INTO users (user_id, first_name, last_name, username, balance, last_bonus, "
+                    "games_played, games_won, referal_bonus_claimed) VALUES (%s,%s,%s,%s,4000,NULL,0,0,0)",
+                    (user_id, first_name or None, last_name or None, username or None))
                 conn.commit()
-                return {"user_id": user_id, "first_name": safe_name, "last_name": last_name or "",
-                        "username": username or "", "balance": 4000, "last_bonus": None,
-                        "games_played": 0, "games_won": 0, "referrer_id": None,
-                        "referred_count": 0, "referal_bonus_claimed": 0, "last_daily": None,
-                        "custom_nick": None, "last_robbery": None, "is_banned": False,
-                        "ban_until": None, "vip_until": None, "btc": 0, "clan_id": None}
-            return {"user_id": row[0], "first_name": row[1], "last_name": row[2], "username": row[3],
-                    "balance": row[4], "last_bonus": row[5], "games_played": row[6],
-                    "games_won": row[7], "referrer_id": row[8], "referred_count": row[9],
-                    "referal_bonus_claimed": row[10], "last_daily": row[11], "custom_nick": row[12],
-                    "last_robbery": row[13], "is_banned": row[14], "ban_until": row[15],
-                    "vip_until": row[16], "btc": float(row[17]) if row[17] else 0, "clan_id": row[18]}
+                return {"user_id": user_id, "first_name": first_name or None,
+                        "last_name": last_name or None, "username": username or None,
+                        "balance": 4000, "last_bonus": None, "games_played": 0, "games_won": 0,
+                        "referrer_id": None, "referred_count": 0, "referal_bonus_claimed": 0,
+                        "last_daily": None, "custom_nick": None, "last_robbery": None,
+                        "is_banned": False, "ban_until": None, "vip_until": None,
+                        "btc": 0, "clan_id": None}
+
+            db_fname, db_uname = row[1], row[3]
+            need_update = False
+            if first_name and (not db_fname or db_fname == "Игрок"):
+                db_fname = first_name
+                need_update = True
+            if username and not db_uname:
+                db_uname = username
+                need_update = True
+            if need_update:
+                cursor.execute(
+                    "UPDATE users SET first_name = %s, username = %s WHERE user_id = %s",
+                    (db_fname, db_uname, user_id))
+                conn.commit()
+
+            return {"user_id": row[0], "first_name": db_fname, "last_name": row[2],
+                    "username": db_uname, "balance": row[4], "last_bonus": row[5],
+                    "games_played": row[6], "games_won": row[7], "referrer_id": row[8],
+                    "referred_count": row[9], "referal_bonus_claimed": row[10],
+                    "last_daily": row[11], "custom_nick": row[12], "last_robbery": row[13],
+                    "is_banned": row[14], "ban_until": row[15], "vip_until": row[16],
+                    "btc": float(row[17]) if row[17] else 0, "clan_id": row[18]}
 
 
 def update_balance(user_id: int, amount: int):
@@ -218,6 +245,18 @@ def find_user_by_identifier(identifier: str):
     return None
 
 
+RANK_LEVELS = {"user": 0, "moder": 1, "spadmin": 2, "admin": 3, "head": 4, "owner": 5}
+
+RANK_NAMES = {
+    "user": "👤 Игрок",
+    "moder": "⭐ Модератор",
+    "spadmin": "✨ Спец. админ",
+    "admin": "🔰 Админ",
+    "head": "👑 Гл. админ",
+    "owner": "💎 Владелец",
+}
+
+
 def get_rank(user_id: int) -> str:
     if user_id == ADMIN_ID:
         return "owner"
@@ -228,31 +267,48 @@ def get_rank(user_id: int) -> str:
             return row[0] if row else "user"
 
 
+def get_rank_level(user_id: int) -> int:
+    return RANK_LEVELS.get(get_rank(user_id), 0)
+
+
+def has_rank(user_id: int, min_rank: str) -> bool:
+    return get_rank_level(user_id) >= RANK_LEVELS.get(min_rank, 999)
+
+
 def get_rank_emoji(rank: str) -> str:
-    return {"owner": "💎 Владелец", "head": "👑 Гл. админ",
-            "admin": "🔰 Админ", "spadmin": "👑 Special Admin",
-            "moder": "⭐ Модератор"}.get(rank, "")
+    return RANK_NAMES.get(rank, "")
 
 
 def is_admin(user_id: int) -> bool:
-    return get_rank(user_id) in ("owner", "head", "admin", "moder", "spadmin")
+    return has_rank(user_id, "moder")
 
 
 def is_moder_or_above(user_id: int) -> bool:
-    return get_rank(user_id) in ("owner", "head", "admin", "moder", "spadmin")
+    return has_rank(user_id, "moder")
+
+
+def is_spadmin_or_above(user_id: int) -> bool:
+    return has_rank(user_id, "spadmin")
 
 
 def is_admin_or_above(user_id: int) -> bool:
-    return get_rank(user_id) in ("owner", "head", "admin")
+    return has_rank(user_id, "admin")
 
 
 def is_head_or_above(user_id: int) -> bool:
-    return get_rank(user_id) in ("owner", "head")
+    return has_rank(user_id, "head")
 
 
 def is_owner(user_id: int) -> bool:
-    return user_id == ADMIN_ID
+    return user_id == ADMIN_ID or get_rank(user_id) == "owner"
 
+
+def can_manage_admin(actor_id: int, target_id: int) -> bool:
+    if actor_id == target_id:
+        return False
+    if get_rank(target_id) == "owner":
+        return False
+    return get_rank_level(actor_id) > get_rank_level(target_id)
 
 def has_secret_power(user_id: int, command: str) -> bool:
     if user_id == ADMIN_ID:
@@ -355,6 +411,15 @@ def delete_promo(code: str):
             cursor.execute("DELETE FROM promocodes WHERE code = %s", (code,))
             conn.commit()
 
+def log_transfer(sender_id: int, receiver_id: int, amount: int, comment: str = ""):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO transfers_log (sender_id, receiver_id, amount, comment, timestamp) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (sender_id, receiver_id, amount, comment, datetime.now().isoformat()))
+            conn.commit()
+
 
 def log_admin_action(admin_id: int, action: str, target_id: int = 0, amount: int = 0):
     with get_db() as conn:
@@ -392,11 +457,27 @@ def format_balance(amount) -> str:
     except:
         return f"{amount} {CURRENCY}"
 
+def get_display_name(user_id: int, first_name=None, username=None, custom_nick=None) -> str:
+    if custom_nick and str(custom_nick).strip():
+        return str(custom_nick).strip()
+    if first_name and str(first_name).strip() and first_name != "Игрок":
+        return str(first_name).strip()
+    if username and str(username).strip():
+        return f"@{username}"
+    return f"id{user_id}"
+
+
+def get_user_link(user_id: int, first_name=None, username=None,
+                  custom_nick=None, show_id: bool = False) -> str:
+    name = get_display_name(user_id, first_name, username, custom_nick)
+    safe = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    link = f'<a href="tg://user?id={user_id}">{safe}</a>'
+    if show_id:
+        link += f" <code>({user_id})</code>"
+    return link
 
 def clean_first_name(first_name: str, user_id: int) -> str:
-    if not first_name:
-        return f"Пользователь - {user_id}"
-    invisible = {"ㅤ", "ᅠ"}
+    return get_display_name(user_id, first_name)    invisible = {"ㅤ", "ᅠ"}
     for ch in first_name:
         if ch.strip() and ch not in invisible:
             return first_name
@@ -1122,21 +1203,27 @@ async def cmd_top(message: Message):
     args = message.text.split()
     if len(args) > 1 and args[1].isdigit():
         limit = int(args[1])
+
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT user_id, first_name, balance FROM users ORDER BY balance DESC LIMIT %s", (limit,))
+            cursor.execute(
+                "SELECT user_id, first_name, balance, username, custom_nick "
+                "FROM users ORDER BY balance DESC LIMIT %s", (limit,))
             rows = cursor.fetchall()
+
     if not rows:
         await message.answer("🏆 Топ пуст.")
         return
+
+    admin_viewer = is_admin(message.from_user.id)
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     text = f"🏆 <b>Топ {len(rows)} игроков:</b>\n\n"
-    for i, row in enumerate(rows, 1):
-        uid, fname, bal = row
-        display = clean_first_name(fname, uid)
-        text += f"{medals.get(i, '')} {i}. <a href='tg://user?id={uid}'>{display}</a> — <b>{format_balance(bal)}</b>\n"
-    await message.answer(text)
 
+    for i, (uid, fname, bal, uname, nick) in enumerate(rows, 1):
+        link = get_user_link(uid, fname, uname, nick, show_id=admin_viewer)
+        text += f"{medals.get(i, f'{i}.')} {link} — <b>{format_balance(bal)}</b>\n"
+
+    await message.answer(text) 
 
 @router.message(F.text == "🏆 Топ")
 async def cmd_top_btn(message: Message):
@@ -1248,12 +1335,55 @@ async def cmd_transfer(message: Message):
     if target['user_id'] == message.from_user.id:
         await message.answer("❌ Нельзя перевести самому себе.")
         return
-    update_balance(user['user_id'], -amount)
+        update_balance(user['user_id'], -amount)
     update_balance(target['user_id'], amount)
-    msg = f"💸 {get_mention(user['user_id'], user['first_name'])} перевел {get_mention(target['user_id'], target['first_name'])} <b>{format_balance(amount)}</b>."
+    log_transfer(user['user_id'], target['user_id'], amount, comment)
+    msg = f"💸 {get_user_link(user['user_id'], user['first_name'], user.get('username'), user.get('custom_nick'))} перевел {get_user_link(target['user_id'], target['first_name'], target.get('username'), target.get('custom_nick'))} <b>{format_balance(amount)}</b>."
     if comment:
         msg += f"\n💬 {comment}"
     await message.answer(msg)
+
+@router.message(Command("transfers"))
+async def cmd_transfer_logs(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Нет доступа.")
+        return
+
+    args = message.text.split()
+    limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 30
+
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT t.id, t.sender_id, u1.first_name, u1.username, u1.custom_nick,
+                       t.receiver_id, u2.first_name, u2.username, u2.custom_nick,
+                       t.amount, t.comment, t.timestamp
+                FROM transfers_log t
+                LEFT JOIN users u1 ON u1.user_id = t.sender_id
+                LEFT JOIN users u2 ON u2.user_id = t.receiver_id
+                ORDER BY t.id DESC LIMIT %s
+            """, (limit,))
+            rows = cursor.fetchall()
+
+    if not rows:
+        await message.answer("📭 Логов переводов пока нет.")
+        return
+
+    text = f"💸 <b>Последние {len(rows)} переводов</b>\n━━━━━━━━━━━━━━━━━\n"
+    for (tid, s_id, s_fn, s_un, s_nk,
+         r_id, r_fn, r_un, r_nk,
+         amount, comment, ts) in rows:
+        s_link = get_user_link(s_id, s_fn, s_un, s_nk, show_id=True)
+        r_link = get_user_link(r_id, r_fn, r_un, r_nk, show_id=True)
+        dt = ts[:16].replace("T", " ") if ts else "—"
+        text += f"<b>#{tid}</b> · {dt}\n"
+        text += f"  {s_link} ➡️ {r_link}\n"
+        text += f"  💰 {format_balance(amount)}"
+        if comment:
+            text += f" · 💬 {comment[:40]}"
+        text += "\n\n"
+
+    await message.answer(text)
 
 
 @router.message(Command("name"))
