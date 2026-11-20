@@ -4006,24 +4006,7 @@ OWNER_HELP_TEXT = (
     "• <code>/emergency_stop</code> — остановить бота\n"
     "\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚡ <b>Дополнительные секретные команды:</b>\n"
-    "• <code>/wipe @user</code> — обнулить баланс\n"
-    "• <code>/mass_pay СУММА</code> — выдать всем сумму\n"
-    "• <code>/rate ЧИСЛО</code> — курс BTC\n"
-    "• <code>/bonus_set СУММА</code> — установить бонус\n"
-    "• <code>/bonus_cd ЧАСЫ</code> — кулдаун бонуса\n"
-    "• <code>/ref_bonus СУММА</code> — реферальный бонус\n"
-    "• <code>/setrank @user РАНГ</code> — изменить ранг\n"
-    "• <code>/force_admin @user</code> — назначить модератором\n"
-    "• <code>/reset_cd @user</code> — сбросить кулдауны\n"
-    "• <code>/reset_cd all</code> — сбросить всем\n"
-    "• <code>/bot_name НОВОЕ_ИМЯ</code> — имя бота\n"
-    "• <code>/currency СИМВОЛ</code> — валюта\n"
-    "• <code>/hard_reset @user</code> — полный сброс пользователя\n"
-    "• <code>/silent on|off</code> — невидимый режим\n"
-    "• <code>/audit</code> — журнал действий админов\n"
-    "• <code>/online</code> — статистика онлайн\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━━"
+    "Дополнительные команды владельца также доступны здесь."
 )
 
 
@@ -6416,9 +6399,10 @@ def admin_panel_kb(uid):
         rows.append([
             InlineKeyboardButton(text="🛡 Управление админами", callback_data="adm:manage_admins"),
         ])
-        if lvl >= 5:
+    if lvl >= 5:
         rows.append([
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm:settings"),
+            InlineKeyboardButton(text="🔐 Секретки", callback_data="adm:secret"),
         ])
     rows.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="adm:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
