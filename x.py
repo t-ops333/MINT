@@ -109,7 +109,8 @@ def init_db():
                 ("last_robbery", "TIMESTAMP"),
                 ("vip_until", "TIMESTAMP"),
                 ("btc", "NUMERIC DEFAULT 0"),
-                ("clan_id", "INT")
+                ("clan_id", "INT"),
+		("robberies_won", "INT DEFAULT 0")
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {col_type}")
@@ -1219,6 +1220,7 @@ async def callback_bonus_lc(callback: CallbackQuery):
 
 
 @router.message(Command("top"))
+@router.message(F.text == "🏆 Топ")
 async def cmd_top(message: Message):
     limit = 10
     args = message.text.split()
@@ -1227,43 +1229,21 @@ async def cmd_top(message: Message):
 
     with get_db() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT user_id, first_name, balance, username, custom_nick "
-                "FROM users ORDER BY balance DESC LIMIT %s", (limit,))
+            cursor.execute("SELECT user_id FROM users ORDER BY balance DESC LIMIT %s", (limit,))
             rows = cursor.fetchall()
 
     if not rows:
-        await message.answer("🏆 Топ пуст.")
-        return
+        return await message.answer("🏆 Топ пуст.")
 
-    # Подтягиваем имена для тех, у кого их нет в БД
-    resolved = []
-    for uid, fname, bal, uname, nick in rows:
-        if not fname or fname == "Игрок":
-            try:
-                chat = await bot.get_chat(uid)
-                new_fname = getattr(chat, "first_name", "") or ""
-                new_uname = getattr(chat, "username", "") or ""
-                if new_fname or new_uname:
-                    with get_db() as conn:
-                        with conn.cursor() as cursor:
-                            cursor.execute(
-                                "UPDATE users SET first_name = %s, username = %s WHERE user_id = %s",
-                                (new_fname or None, new_uname or None, uid))
-                            conn.commit()
-                    fname = new_fname or fname
-                    uname = new_uname or uname
-            except Exception as e:
-                logging.warning(f"get_chat failed for {uid}: {e}")
-        resolved.append((uid, fname, bal, uname, nick))
-
-    admin_viewer = is_admin(message.from_user.id)
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    text = f"🏆 <b>Топ {len(resolved)} игроков:</b>\n\n"
+    text = f"🏆 <b>Топ {len(rows)} игроков:</b>\n\n"
 
-    for i, (uid, fname, bal, uname, nick) in enumerate(resolved, 1):
-        link = get_user_link(uid, fname, uname, nick, show_id=admin_viewer)
-        text += f"{medals.get(i, f'{i}.')} {link} — <b>{format_balance(bal)}</b>\n"
+    for i, r in enumerate(rows, 1):
+        uid = r[0]
+        u = get_user(uid)
+        link = get_user_link(uid, u['first_name'], u.get('username'), u.get('custom_nick'))
+        text += f"{medals.get(i, f'{i}.')} {link} — <b>{format_balance(u['balance'])}</b>\n"
+        text += f"   <i>{get_user_title(u)}</i>\n" # <--- ТИТУЛ
 
     await message.answer(text)
 
@@ -2887,6 +2867,10 @@ async def rob_do(callback: CallbackQuery):
     if success:
         win_amount = random.randint(t["min"], t["max"])
         update_balance(uid, win_amount)
+        with get_db() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE users SET robberies_won = COALESCE(robberies_won, 0) + 1 WHERE user_id = %s", (uid,))
+                conn.commit()
         log_admin_action(uid, f"rob_success {target} {win_amount}")
         result_text = (
             f"🎉🎉🎉 <b>УСПЕХ!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
